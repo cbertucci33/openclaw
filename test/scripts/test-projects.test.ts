@@ -884,7 +884,11 @@ describe("scripts/test-projects changed-target routing", () => {
   it("keeps extension batch runner edits on extension script tests", () => {
     expectChangedTargets(
       ["scripts/test-extension-batch.mts"],
-      ["test/scripts/test-extension.test.ts", "test/scripts/test-projects-build-admission.test.ts"],
+      [
+        "test/scripts/test-extension.test.ts",
+        "test/scripts/test-projects-build-admission.test.ts",
+        "test/scripts/ci-node-test-plan.test.ts",
+      ],
     );
   });
 

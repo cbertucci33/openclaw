@@ -5250,6 +5250,7 @@ describe("scripts/lib/ci-node-test-plan.mts", () => {
         "src/plugin-sdk/core.ts",
         "test/scripts/ci-linux-git.test.ts",
         "src/infra/home-dir.test.ts",
+        String.raw`ui\src\pages\chat\view.ts`,
       ],
     }).flatMap((shard) => shard.includePatterns ?? []);
     expect(full.filter((file) => file === RELEASE_REPORT_OWNER_TEST)).toHaveLength(1);
