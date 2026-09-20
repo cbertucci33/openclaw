@@ -40,7 +40,11 @@ import {
   bundledPluginDependentUnitTestFiles,
   isUnitConfigTestFile,
 } from "../../test/vitest/vitest.unit-paths.mjs";
-import { buildVitestRunPlans, isTestFileTarget } from "../test-projects.test-support.mts";
+import {
+  buildVitestRunPlans,
+  isTestFileTarget,
+  isToolingTestOwnerPath,
+} from "../test-projects.test-support.mts";
 import { isCiProofTestFile } from "./ci-proof-test-inventory.mts";
 import { rebalanceRuntimeTestJobs } from "./ci-runtime-test-placement.mts";
 import { isRuntimePlacementIncludePatterns } from "./ci-test-timings-schema.mts";
@@ -64,6 +68,8 @@ import {
   estimateVitestToolingFileSeconds as toolingFileWeight,
   parseCompactSplitTimingKey,
 } from "./vitest-shard-metadata.mts";
+
+export { isToolingTestOwnerPath } from "../test-projects.test-support.mts";
 
 export type NodeTestShardGroup = {
   shard_name: string;
@@ -100,7 +106,7 @@ type NodeTestPlanOptions = {
   changedPaths?: readonly string[];
   includeReleaseOnlyPluginShards?: boolean;
   includeProofTests?: boolean;
-  includeReleaseOnlyToolingTests?: boolean;
+  includeReleaseOnlyToolingShards?: boolean;
   compact?: boolean;
   compactMode?: CompactNodeTestPlanMode;
   compactGroupCount?: number;
@@ -136,55 +142,15 @@ type CompactNodeTestPlanMode = "pull-request" | "push";
 
 type PolicyTestWatch = {
   ownerGlobs?: readonly string[];
-  sourceOnly?: boolean;
   testFile: string;
   watchGlobs: readonly string[];
 };
-
-// These real-process compositions keep their ordinary tooling owners in manual
-// and release plans. Automatic plans retain them when their inputs change.
-const RELEASE_ONLY_TOOLING_TESTS = new Map<string, readonly string[]>([
-  [
-    "test/scripts/vitest-report-owner.test.ts",
-    [
-      "scripts/**",
-      "test/vitest/**",
-      "test/fixtures/**",
-      "test/helpers/**",
-      "test/setup*.ts",
-      "test/test-env.ts",
-      "test/test-home*.{ts,mts}",
-      "test/non-isolated-runner.ts",
-      "test/scripts/vitest-report-fixture.ts",
-      // Native child configs also load the shared test-home/runtime bootstrap.
-      "src/{cli,config,daemon,infra,process,shared,test-utils}/**",
-      "packages/**",
-      "package.json",
-      "pnpm-lock.yaml",
-      "pnpm-workspace.yaml",
-      "patches/**",
-      "node-host-launcher.mjs",
-      "node-sqlite.mjs",
-      "node-version.mjs",
-      "tsconfig*.json",
-      "config/tsconfig/**",
-      ".npmrc",
-      ".github/workflows/ci.yml",
-      ".github/actions/**",
-    ],
-  ],
-]);
 
 // These tests read source trees instead of importing every file whose policy
 // they enforce. Boundary and contract suites have dedicated always-on lanes;
 // this inventory covers the remaining tests that changed targeting cannot
 // discover from imports alone.
 const policyTestWatches = [
-  ...Array.from(RELEASE_ONLY_TOOLING_TESTS, ([testFile, watchGlobs]): PolicyTestWatch => ({
-    sourceOnly: true,
-    testFile,
-    watchGlobs,
-  })),
   {
     testFile: "test/scripts/tsgo-core-test-shards.test.ts",
     watchGlobs: [
@@ -265,11 +231,9 @@ const policyTestWatches = [
 /** Resolve policy tests whose scanned source surface intersects this diff. */
 export function resolvePolicyTestTargets(changedPaths: readonly string[]): string[] {
   return policyTestWatches
-    .filter(({ sourceOnly, watchGlobs }) =>
-      changedPaths.some(
-        (changedPath) =>
-          (!sourceOnly || !isTestFileTarget(changedPath)) &&
-          watchGlobs.some((watchGlob) => matchesGlob(changedPath, watchGlob)),
+    .filter(({ watchGlobs }) =>
+      changedPaths.some((changedPath) =>
+        watchGlobs.some((watchGlob) => matchesGlob(changedPath, watchGlob)),
       ),
     )
     .map(({ testFile }) => testFile);
@@ -282,13 +246,11 @@ export function isPolicyTestOwnedPath(changedPath: string): boolean {
   );
 }
 
-function resolveExcludedReleaseOnlyToolingTests(options: NodeTestPlanOptions): Set<string> {
-  if (options.includeReleaseOnlyToolingTests !== false) {
-    return new Set();
-  }
-  const changedPaths = options.changedPaths ?? [];
-  const selected = new Set([...changedPaths, ...resolvePolicyTestTargets(changedPaths)]);
-  return new Set([...RELEASE_ONLY_TOOLING_TESTS.keys()].filter((file) => !selected.has(file)));
+function includesReleaseOnlyTooling(options: NodeTestPlanOptions): boolean {
+  return (
+    options.includeReleaseOnlyToolingShards !== false ||
+    (options.changedPaths ?? []).some(isToolingTestOwnerPath)
+  );
 }
 
 export type CompactNodeTestShard = Omit<NodeTestShard, "configs" | "groups"> & {
@@ -1349,6 +1311,33 @@ const KEEP_LARGE_NODE_TEST_RUNNER = new Set([
   "core-unit-src-security-support",
 ]);
 const RELEASE_ONLY_PLUGIN_SHARDS = new Set(["agentic-plugins"]);
+const RELEASE_ONLY_TOOLING_SHARDS = new Set(["core-tooling"]);
+export const RELEASE_ONLY_TOOLING_CONFIGS = new Set(
+  fullSuiteVitestShards
+    .filter((shard) => RELEASE_ONLY_TOOLING_SHARDS.has(shard.name))
+    .flatMap((shard) => shard.projects),
+);
+
+export function isReleaseOnlyToolingTestFile(file: string): boolean {
+  return (
+    !file.endsWith(".e2e.test.ts") &&
+    !file.endsWith(".live.test.ts") &&
+    (file.startsWith("test/scripts/") || file.startsWith("src/scripts/"))
+  );
+}
+
+function mixedToolingTestFiles(configs: readonly string[]): string[] | undefined {
+  const files = [
+    ...(configs.includes("test/vitest/vitest.unit-fast-isolated.config.ts")
+      ? getUnitFastIsolatedTestFiles()
+      : []),
+    ...(configs.includes("test/vitest/vitest.unit-fast-fake-timers.config.ts")
+      ? getUnitFastTimerTestFiles()
+      : []),
+  ];
+  return files.length > 0 ? files : undefined;
+}
+
 function listTestFiles(rootDir: string): string[] {
   return listTrackedTestFiles(rootDir);
 }
@@ -2546,7 +2535,7 @@ function createNodeTestShardsForOwners(
   const includeProofTests =
     options.includeProofTests ??
     (options.compactMode ?? (options.compact ? "pull-request" : undefined)) !== "pull-request";
-  const excludedToolingTests = resolveExcludedReleaseOnlyToolingTests(options);
+  const includeTooling = includesReleaseOnlyTooling(options);
   const changedTestPlans = includeReleaseOnlyPluginShards
     ? []
     : (options.changedPaths ?? [])
@@ -2561,6 +2550,7 @@ function createNodeTestShardsForOwners(
   return owners.flatMap((shard) => {
     if (
       EXCLUDED_FULL_SUITE_SHARDS.has(shard.config) ||
+      (!includeTooling && RELEASE_ONLY_TOOLING_SHARDS.has(shard.name)) ||
       (toolingOnly &&
         shard.name !== "core-tooling" &&
         shard.name !== "core-runtime" &&
@@ -2587,7 +2577,9 @@ function createNodeTestShardsForOwners(
           return [];
         }
 
-        let includePatterns = splitShard.includePatterns;
+        let includePatterns =
+          splitShard.includePatterns ??
+          (!includeTooling ? mixedToolingTestFiles(splitConfigs) : undefined);
         if (!includeProofTests) {
           const files = includePatterns ?? listWholeConfigSplitFiles(splitShard.shardName);
           if (files?.some(isCiProofTestFile)) {
@@ -2597,8 +2589,8 @@ function createNodeTestShardsForOwners(
             }
           }
         }
-        if (includePatterns && splitConfigs.includes(TOOLING_CONFIG)) {
-          includePatterns = includePatterns.filter((file) => !excludedToolingTests.has(file));
+        if (includePatterns && !includeTooling) {
+          includePatterns = includePatterns.filter((file) => !isReleaseOnlyToolingTestFile(file));
           if (includePatterns.length === 0) {
             return [];
           }
@@ -2897,7 +2889,7 @@ export function createNodeTestShardBundles(
     return createCompactNodeTestShardBundles(
       // Keep complete owners for cost admission; compact projection below gives
       // a reduced tooling selection its own timing identity.
-      createNodeTestShards({ ...options, includeReleaseOnlyToolingTests: true }),
+      createNodeTestShards({ ...options, includeReleaseOnlyToolingShards: true }),
       { ...options, compactMode },
       compactMode,
     );
@@ -3729,7 +3721,7 @@ function createCompactNodeTestShardBundles(
       COMPACT_NODE_TEST_JOB_CAP,
       compactNodeJobCap + bins.filter((bin) => bin[0]?.requiresDist).length,
     );
-  const excludedToolingTests = resolveExcludedReleaseOnlyToolingTests(options);
+  const includeTooling = compactMode !== "push" && includesReleaseOnlyTooling(options);
   const isBlacksmithProfile = (options.runnerBackend ?? "blacksmith") === "blacksmith";
   const packsHostedTooling = compactMode === "pull-request" && options.runnerBackend === "github";
   let bestTailDonation: HostedToolingTailDonation | undefined;
@@ -3749,7 +3741,10 @@ function createCompactNodeTestShardBundles(
         }
       : undefined;
   const shards = sourceShards.filter(
-    (shard) => compactMode !== "push" || !COMPACT_PUSH_EXCLUDED_SHARDS.has(shard.shardName),
+    (shard) =>
+      (compactMode !== "push" || !COMPACT_PUSH_EXCLUDED_SHARDS.has(shard.shardName)) &&
+      (includeTooling ||
+        !shard.configs.every((config) => RELEASE_ONLY_TOOLING_CONFIGS.has(config))),
   );
   const groupsByRunner = new Map<string, [NodeTestShardGroup, ...NodeTestShardGroup[]]>();
   const synthesizedSplitSeconds = new Map<string, number>();
@@ -3800,18 +3795,24 @@ function createCompactNodeTestShardBundles(
           )
         : [{ group, seconds: estimateCompactGroupSeconds(group, options.runnerBackend) }];
     const reducedToolingTier =
-      group.configs.includes(TOOLING_CONFIG) &&
-      group.includePatterns?.some((file) => excludedToolingTests.has(file));
+      !includeTooling &&
+      plannedGroups.some((planned) =>
+        (planned.group.includePatterns ?? mixedToolingTestFiles(planned.group.configs))?.some(
+          isReleaseOnlyToolingTestFile,
+        ),
+      );
     const selectedTooling =
       (selectedToolingFiles && group.configs.includes(TOOLING_CONFIG)) || reducedToolingTier;
     if (selectedTooling) {
       // Keep the parent's admission cost and partition policy, but never report
       // a precise subset as a sample of the complete canonical stripe.
       plannedGroups = plannedGroups.flatMap((planned) => {
-        const includePatterns = planned.group.includePatterns?.filter(
+        const includePatterns = (
+          planned.group.includePatterns ?? mixedToolingTestFiles(planned.group.configs)
+        )?.filter(
           (file) =>
             (!selectedToolingFiles || selectedToolingFiles.has(file)) &&
-            !excludedToolingTests.has(file),
+            (includeTooling || !isReleaseOnlyToolingTestFile(file)),
         );
         return includePatterns?.length
           ? [{ ...planned, group: { ...planned.group, includePatterns } }]

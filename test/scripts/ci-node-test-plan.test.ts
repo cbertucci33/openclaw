@@ -80,7 +80,11 @@ import { createUiIsolatedVitestConfig } from "../vitest/vitest.ui-isolated.confi
 import { uiTimingTestFiles } from "../vitest/vitest.ui-paths.mjs";
 import { createUiTimingVitestConfig } from "../vitest/vitest.ui-timing.config.ts";
 import { createUiVitestConfig } from "../vitest/vitest.ui.config.ts";
-import { getUnitFastTestFilesForIncludePatterns } from "../vitest/vitest.unit-fast-paths.mjs";
+import {
+  getUnitFastTestFilesForIncludePatterns,
+  getUnitFastIsolatedTestFiles,
+  getUnitFastTimerTestFiles,
+} from "../vitest/vitest.unit-fast-paths.mjs";
 import { createUnitFastVitestConfig } from "../vitest/vitest.unit-fast.config.ts";
 import { createUnitVitestConfigWithOptions } from "../vitest/vitest.unit.config.ts";
 import { createWizardVitestConfig } from "../vitest/vitest.wizard.config.ts";
@@ -2740,8 +2744,13 @@ describe("scripts/lib/ci-node-test-plan.mts", () => {
         const actual = groups.flatMap((group) => group.includePatterns ?? []);
         expect(new Set(actual).size, owner.shardName).toBe(actual.length);
         if (owner.includePatterns) {
+          const expectedFiles = [compact, githubCompact, hybridCompact].includes(plan)
+            ? owner.includePatterns.filter(
+                (file) => !file.startsWith("test/scripts/") && !file.startsWith("src/scripts/"),
+              )
+            : owner.includePatterns;
           expect(actual.toSorted(), owner.shardName).toEqual(
-            retainedFiles(owner.includePatterns).toSorted(),
+            retainedFiles(expectedFiles).toSorted(),
           );
         } else if (owner.shardName === "agentic-agents-support") {
           expect(actual.toSorted()).toEqual(supportOwnerFiles.toSorted());
@@ -2776,7 +2785,10 @@ describe("scripts/lib/ci-node-test-plan.mts", () => {
           pluginSdkOwnerFiles,
           pluginSdkLightOwnerFiles,
           runtimeConfigOwnerFiles,
+          getUnitFastIsolatedTestFiles(),
+          getUnitFastTimerTestFiles(),
         )
+        .filter((file) => !file.startsWith("test/scripts/") && !file.startsWith("src/scripts/"))
         .toSorted((a, b) => a.localeCompare(b)),
     );
     expect(
@@ -5242,58 +5254,59 @@ describe("scripts/lib/ci-node-test-plan.mts", () => {
     expect(shardNames).toContain("agentic-plugin-sdk");
   });
 
-  it("keeps the complete report composition in manual plans and omits only it from automatic tooling", () => {
-    const full = defaultShards.flatMap((shard) => shard.includePatterns ?? []);
+  it("keeps the complete tooling family in manual plans and omits it from product plans", () => {
     const automatic = createNodeTestShards({
-      includeReleaseOnlyToolingTests: false,
-      changedPaths: [
-        "src/plugin-sdk/core.ts",
-        "test/scripts/ci-linux-git.test.ts",
-        "src/infra/home-dir.test.ts",
-        String.raw`ui\src\pages\chat\view.ts`,
-      ],
-    }).flatMap((shard) => shard.includePatterns ?? []);
-    expect(full.filter((file) => file === RELEASE_REPORT_OWNER_TEST)).toHaveLength(1);
-    expect(automatic).not.toContain(RELEASE_REPORT_OWNER_TEST);
-    expect(automatic.toSorted()).toEqual(
-      full.filter((file) => file !== RELEASE_REPORT_OWNER_TEST).toSorted(),
+      includeReleaseOnlyToolingShards: false,
+      changedPaths: ["src/plugin-sdk/core.ts", "src/infra/home-dir.test.ts"],
+    });
+    expect(defaultShards.some((shard) => shard.shardName.startsWith("core-tooling-"))).toBe(true);
+    expect(automatic.some((shard) => shard.shardName.startsWith("core-tooling-"))).toBe(false);
+    expect(automatic.flatMap((shard) => shard.includePatterns ?? [])).not.toEqual(
+      expect.arrayContaining([RELEASE_REPORT_OWNER_TEST, "test/scripts/arg-utils.test.ts"]),
     );
-    expect(automatic).toContain("test/scripts/pr-merge-outcome.test.ts");
+    for (const shard of automatic) {
+      expect(shard.includePatterns?.some((file) => file.startsWith("test/scripts/"))).not.toBe(
+        true,
+      );
+    }
+    expect(automatic.flatMap((shard) => shard.includePatterns ?? [])).toContain(
+      "src/infra/home-dir.test.ts",
+    );
   });
 
   it.each([
     RELEASE_REPORT_OWNER_TEST,
+    "test/scripts/arg-utils.test.ts",
     "scripts/lib/vitest-report-owner.mts",
-    "scripts/test-projects-run.mts",
     "scripts/test-extension-batch.mts",
-    "test/scripts/vitest-report-fixture.ts",
-    "test/vitest/vitest.reporters.ts",
+    "src/scripts/example.ts",
+    "scripts/README.md",
+    "config/ci-budget.md",
+    "test/vitest/vitest.tooling.config.ts",
     "test/helpers/temp-dir.ts",
-    "test/test-home-policy.mts",
-    "test/test-env.ts",
-    "src/cli/wait.ts",
-    "src/infra/node-options.ts",
-    "src/config/paths.ts",
-    "src/daemon/constants.ts",
-    "src/test-utils/env.ts",
-    "node-sqlite.mjs",
-    "packages/normalization-core/src/record-coerce.ts",
+    "config/ci-test-timings.json",
     "package.json",
     "pnpm-lock.yaml",
+    "pnpm-workspace.yaml",
     "patches/vitest@5.0.0.patch",
     ".github/workflows/ci.yml",
-  ])("retains the report composition in fallback when %s changes", (changedPath) => {
-    const shards = createNodeTestShards({
-      includeReleaseOnlyToolingTests: false,
-      changedPaths: ["src/plugin-sdk/core.ts", changedPath],
-    });
-    expect(shards.flatMap((shard) => shard.includePatterns ?? [])).toContain(
-      RELEASE_REPORT_OWNER_TEST,
-    );
+    ".github/ISSUE_TEMPLATE/bug_report.md",
+    ".crabbox.yaml",
+    "Dockerfile",
+    "apps/ios/fastlane/Fastfile",
+    "extensions/matrix/package.json",
+    "extensions/matrix/scripts/build.mjs",
+  ])("retains the complete tooling family when owner %s changes", (changedPath) => {
+    expect(
+      createNodeTestShards({
+        includeReleaseOnlyToolingShards: false,
+        changedPaths: ["src/plugin-sdk/core.ts", changedPath],
+      }),
+    ).toEqual(defaultShards);
   });
 
   it.each(["blacksmith", "github", "hybrid"])(
-    "preserves tooling execution and separate timing ownership in the automatic %s tier",
+    "preserves product coverage and canonical tooling owners across the %s release tier",
     (runnerBackend) => {
       const options = {
         compactMode: "pull-request" as const,
@@ -5303,44 +5316,64 @@ describe("scripts/lib/ci-node-test-plan.mts", () => {
       const full = getCommittedCompactPlan("pull-request", runnerBackend);
       const automatic = createNodeTestShardBundles({
         ...options,
-        includeReleaseOnlyToolingTests: false,
+        includeReleaseOnlyToolingShards: false,
         changedPaths: ["src/gateway/server.ts"],
       });
       const fullGroups = full.flatMap((job) => job.groups);
       const automaticGroups = automatic.flatMap((job) => job.groups);
-      const fullFiles = fullGroups.flatMap((group) => group.includePatterns ?? []);
-      const automaticFiles = automaticGroups.flatMap((group) => group.includePatterns ?? []);
-      expect(automaticFiles.toSorted()).toEqual(
-        fullFiles.filter((file) => file !== RELEASE_REPORT_OWNER_TEST).toSorted(),
-      );
-      const reduced = automaticGroups.filter((group) =>
-        group.timing_key?.startsWith("changed-core-tooling-"),
-      );
-      expect(reduced.length).toBeGreaterThan(0);
-      for (const group of reduced) {
-        expect(group.configs).toEqual(["test/vitest/vitest.tooling.config.ts"]);
-        expect(group.env?.OPENCLAW_VITEST_MAX_WORKERS).toBe("2");
-        expect(group.includePatterns?.length).toBeGreaterThan(0);
-        expect(group.requiresDist).toBe(false);
-        expect(parseCompactSplitTimingKey(group.timing_key!)?.parentShardName).toMatch(
-          /^changed-core-tooling-\d+$/u,
-        );
-        expect(automatic.find((job) => job.groups.includes(group))?.planConcurrency).toBe(1);
-      }
+      const productFiles = (groups: typeof fullGroups) =>
+        groups
+          .filter((group) => !group.configs.some((config) => config.includes("vitest.tooling")))
+          .flatMap(
+            (group) =>
+              group.includePatterns ??
+              group.configs.flatMap((config) => {
+                if (config === "test/vitest/vitest.unit-fast-isolated.config.ts") {
+                  return getUnitFastIsolatedTestFiles();
+                }
+                if (config === "test/vitest/vitest.unit-fast-fake-timers.config.ts") {
+                  return getUnitFastTimerTestFiles();
+                }
+                return [];
+              }),
+          )
+          .filter((file) => !file.startsWith("test/scripts/") && !file.startsWith("src/scripts/"))
+          .toSorted();
+      expect(
+        automaticGroups.some((group) =>
+          group.configs.some((config) => config.includes("vitest.tooling")),
+        ),
+      ).toBe(false);
+      expect(
+        automaticGroups
+          .flatMap((group) => group.includePatterns ?? [])
+          .some((file) => file.startsWith("test/scripts/")),
+      ).toBe(false);
+      expect(productFiles(automaticGroups)).toEqual(productFiles(fullGroups));
       expect(
         createNodeTestShardBundles({
           ...options,
-          includeReleaseOnlyToolingTests: false,
+          includeReleaseOnlyToolingShards: false,
           changedPaths: ["package.json"],
         }),
       ).toEqual(full);
+      const push = createNodeTestShardBundles({
+        ...options,
+        compactMode: "push",
+        includeReleaseOnlyToolingShards: false,
+        changedPaths: ["package.json"],
+      });
       expect(
-        createNodeTestShardBundles({
-          ...options,
-          compactMode: "push",
-          includeReleaseOnlyToolingTests: false,
-        }),
-      ).toEqual(getCommittedCompactPlan("push", runnerBackend));
+        push
+          .flatMap((job) => job.groups)
+          .some((group) => group.configs.some((config) => config.includes("vitest.tooling"))),
+      ).toBe(false);
+      expect(
+        push
+          .flatMap((job) => job.groups)
+          .flatMap((group) => group.includePatterns ?? [])
+          .some((file) => file.startsWith("test/scripts/")),
+      ).toBe(false);
     },
   );
 
