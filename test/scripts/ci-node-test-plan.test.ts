@@ -144,6 +144,7 @@ type VitestConfig = {
 };
 
 const PLUGIN_PRERELEASE_NPM_SPEC_TEST = "src/plugins/install.npm-spec.test.ts";
+const RELEASE_REPORT_OWNER_TEST = "test/scripts/vitest-report-owner.test.ts";
 const PRIVATE_QA_TOOLING_TEST = "test/e2e/qa-lab/runtime/gateway-codex-delivery-cache.test.ts";
 const DEFAULT_NODE_TEST_RUNNER = "blacksmith-8vcpu-ubuntu-2404";
 const BUNDLED_NODE_TEST_RUNNER = "blacksmith-4vcpu-ubuntu-2404";
@@ -5240,6 +5241,102 @@ describe("scripts/lib/ci-node-test-plan.mts", () => {
     expect(shardNames).toContain("agentic-gateway-methods");
     expect(shardNames).toContain("agentic-plugin-sdk");
   });
+
+  it("keeps the complete report composition in manual plans and omits only it from automatic tooling", () => {
+    const full = defaultShards.flatMap((shard) => shard.includePatterns ?? []);
+    const automatic = createNodeTestShards({
+      includeReleaseOnlyToolingTests: false,
+    }).flatMap((shard) => shard.includePatterns ?? []);
+    expect(full.filter((file) => file === RELEASE_REPORT_OWNER_TEST)).toHaveLength(1);
+    expect(automatic).not.toContain(RELEASE_REPORT_OWNER_TEST);
+    expect(automatic.toSorted()).toEqual(
+      full.filter((file) => file !== RELEASE_REPORT_OWNER_TEST).toSorted(),
+    );
+    expect(automatic).toContain("test/scripts/pr-merge-outcome.test.ts");
+  });
+
+  it.each([
+    RELEASE_REPORT_OWNER_TEST,
+    "scripts/lib/vitest-report-owner.mts",
+    "scripts/test-projects-run.mts",
+    "scripts/test-extension-batch.mts",
+    "test/scripts/vitest-report-fixture.ts",
+    "test/vitest/vitest.reporters.ts",
+    "test/helpers/temp-dir.ts",
+    "test/test-home-policy.mts",
+    "test/test-env.ts",
+    "src/cli/wait.ts",
+    "src/infra/node-options.ts",
+    "src/config/paths.ts",
+    "src/daemon/constants.ts",
+    "src/test-utils/env.ts",
+    "node-sqlite.mjs",
+    "packages/normalization-core/src/record-coerce.ts",
+    "package.json",
+    "pnpm-lock.yaml",
+    "patches/vitest@5.0.0.patch",
+    ".github/workflows/ci.yml",
+  ])("retains the report composition in fallback when %s changes", (changedPath) => {
+    const shards = createNodeTestShards({
+      includeReleaseOnlyToolingTests: false,
+      changedPaths: ["src/plugin-sdk/core.ts", changedPath],
+    });
+    expect(shards.flatMap((shard) => shard.includePatterns ?? [])).toContain(
+      RELEASE_REPORT_OWNER_TEST,
+    );
+  });
+
+  it.each(["blacksmith", "github", "hybrid"])(
+    "preserves tooling execution and separate timing ownership in the automatic %s tier",
+    (runnerBackend) => {
+      const options = {
+        compactMode: "pull-request" as const,
+        includeReleaseOnlyPluginShards: false,
+        runnerBackend,
+      };
+      const full = getCommittedCompactPlan("pull-request", runnerBackend);
+      const automatic = createNodeTestShardBundles({
+        ...options,
+        includeReleaseOnlyToolingTests: false,
+        changedPaths: ["src/gateway/server.ts"],
+      });
+      const fullGroups = full.flatMap((job) => job.groups);
+      const automaticGroups = automatic.flatMap((job) => job.groups);
+      const fullFiles = fullGroups.flatMap((group) => group.includePatterns ?? []);
+      const automaticFiles = automaticGroups.flatMap((group) => group.includePatterns ?? []);
+      expect(automaticFiles.toSorted()).toEqual(
+        fullFiles.filter((file) => file !== RELEASE_REPORT_OWNER_TEST).toSorted(),
+      );
+      const reduced = automaticGroups.filter((group) =>
+        group.timing_key?.startsWith("changed-core-tooling-"),
+      );
+      expect(reduced.length).toBeGreaterThan(0);
+      for (const group of reduced) {
+        expect(group.configs).toEqual(["test/vitest/vitest.tooling.config.ts"]);
+        expect(group.env?.OPENCLAW_VITEST_MAX_WORKERS).toBe("2");
+        expect(group.includePatterns?.length).toBeGreaterThan(0);
+        expect(group.requiresDist).toBe(false);
+        expect(parseCompactSplitTimingKey(group.timing_key!)?.parentShardName).toMatch(
+          /^changed-core-tooling-\d+$/u,
+        );
+        expect(automatic.find((job) => job.groups.includes(group))?.planConcurrency).toBe(1);
+      }
+      expect(
+        createNodeTestShardBundles({
+          ...options,
+          includeReleaseOnlyToolingTests: false,
+          changedPaths: ["package.json"],
+        }),
+      ).toEqual(full);
+      expect(
+        createNodeTestShardBundles({
+          ...options,
+          compactMode: "push",
+          includeReleaseOnlyToolingTests: false,
+        }),
+      ).toEqual(getCommittedCompactPlan("push", runnerBackend));
+    },
+  );
 
   it("keeps changed native browser tests in UI jobs and out of extension fallback", () => {
     const target = "extensions/workboard/browser/catalog.test.ts";

@@ -309,6 +309,20 @@ These are intentionally guarded by `test/scripts/ci-workflow-guards.test.ts`:
   Targeted plans retain the full built-artifact
   boundary gate. `main` uses compact integration; manual and release runs use
   full named shards.
+- `RELEASE_ONLY_TOOLING_TESTS` in the Node planner retains the native report
+  composition suite for every CI manual dispatch, including Full Release
+  Validation's frozen-candidate `normal_ci` child. Canonical PR plans omit it only
+  when its test, fixture, scripts, shared harness and dependency owners are
+  untouched; precise and fallback PR selection share the owner watches. Fork
+  repositories retain full tooling because they do not use canonical targeting. Keep
+  canonical tooling process metadata and complete-parent timing floors, and
+  isolate reduced-inventory timing identities. Main already omits tooling;
+  report savings as historical PR file-seconds, not main or wall-time savings.
+  CI's plugin flag stays false even on dispatch because Plugin Prerelease owns
+  that separate sweep. Do not infer release inclusion from a shard name or
+  conflate regular full-campaign publication with approved preflight-only beta
+  exceptions. Security, migration, storage, protocol, SDK and update-correctness
+  tests are outside this move.
 - The combined Node matrix admits compact and plugin descriptors by estimated
   duration within the same cap. Catch-all, QA and provider configs use the
   existing 90-file envelope budget with native Vitest sharding; retain complete

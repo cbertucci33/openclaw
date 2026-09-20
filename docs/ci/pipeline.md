@@ -35,6 +35,19 @@ plugin coverage lives in the separate
 [`Full Release Validation`](/ci/release-validation#full-release-validation) or an explicit manual
 dispatch.
 
+The full named Node plan also retains the planner's release-only tooling files.
+Ordinary push/PR plans omit the native test-report composition suite unless a PR
+changes its test, owner, harness, or dependency inputs. Every CI manual dispatch
+includes it. Full Release Validation's `normal_ci` child runs that exact candidate
+plan before the regular release publication gate accepts the campaign; OpenClaw
+Release Checks and Plugin Prerelease are separate proof owners. This is candidate
+validation, not a test deferred until promotion. Direct human beta publication
+with approved preflight-only evidence remains an explicit existing exception to
+full-campaign validation; this tier does not change publication authority.
+Fork repositories keep their existing full tooling coverage because they do not
+use the canonical changed-test planner. Fork-origin PRs targeting this repository
+use the canonical PR selection and retain changed-owner coverage.
+
 Scheduled QA runs nightly at 04:41 UTC. Its live runtime job runs the
 `gateway-restart-full-access-live` scenario with `openai/gpt-5.6-luna` alongside
 the three-restart replay-safety scenario. The Full Access check must preserve

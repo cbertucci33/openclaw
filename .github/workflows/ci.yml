@@ -1734,6 +1734,7 @@ jobs:
                   ...createNodeTestPlan({
                     includeProofTests: runProofTier,
                     includeReleaseOnlyPluginShards: false,
+                    includeReleaseOnlyToolingTests: eventName === "workflow_dispatch" || !isCanonicalRepository,
                     ...(compactPullRequest && changedPaths ? { changedPaths } : {}),
                     // Keep the legacy boolean for historical target planners;
                     // current planners use the event-specific mode.

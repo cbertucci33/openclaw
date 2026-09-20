@@ -669,20 +669,23 @@ function runCiManifestFixture(options: {
             runner: "ubuntu-24.04",
             shardName: "legacy-node-plan",
           }];
-          export const createNodeTestShardBundles = (options = {}) => [{
-            checkName: "bundled-node-plan",
-            configs: ["test/vitest/bundled.config.ts"],
-            includePatterns: options.changedPaths,
-            env: {
-              OPENCLAW_CI_TEST_COMPACT_MODE: options.compactMode ?? "full",
-              OPENCLAW_CI_TEST_COMPACT_NODE_JOB_CAP: String(options.compactNodeJobCap ?? ""),
-              OPENCLAW_CI_TEST_RUNNER_BACKEND: options.runnerBackend ?? "",
-              OPENCLAW_CI_TEST_PROOF_TIER: String(options.includeProofTests),
-            },
-            requiresDist: false,
-            runner: "ubuntu-24.04",
-            shardName: "bundled-node-plan",
-          }];
+          export const createNodeTestShardBundles = (options = {}) => {
+            console.log("node-test-plan-options:" + JSON.stringify(options));
+            return [{
+              checkName: "bundled-node-plan",
+              configs: ["test/vitest/bundled.config.ts"],
+              includePatterns: options.changedPaths,
+              env: {
+                OPENCLAW_CI_TEST_COMPACT_MODE: options.compactMode ?? "full",
+                OPENCLAW_CI_TEST_COMPACT_NODE_JOB_CAP: String(options.compactNodeJobCap ?? ""),
+                OPENCLAW_CI_TEST_RUNNER_BACKEND: options.runnerBackend ?? "",
+                OPENCLAW_CI_TEST_PROOF_TIER: String(options.includeProofTests),
+              },
+              requiresDist: false,
+              runner: "ubuntu-24.04",
+              shardName: "bundled-node-plan",
+            }];
+          };
         `
           : `
           export const createNodeTestShards = () => [{
@@ -14563,9 +14566,10 @@ printf '%s\n' "\${CURL_SUCCESS_IP:-203.0.113.7}"
     ["pull_request", "openclaw/openclaw", true],
     ["pull_request", "example/openclaw", false],
     ["push", "openclaw/openclaw", false],
+    ["push", "example/openclaw", false],
     ["workflow_dispatch", "openclaw/openclaw", false],
   ] as const)(
-    "forwards changed paths only to canonical PR fallback (%s, %s)",
+    "forwards release tiers and canonical PR changed paths (%s, %s)",
     (eventName, repository, forwardsChangedPaths) => {
       const changedPaths = [
         "src/plugins/manifest-tool-availability.ts",
@@ -14578,6 +14582,17 @@ printf '%s\n' "\${CURL_SUCCESS_IP:-203.0.113.7}"
         repository,
       });
       expect(manifest.status, manifest.output).toBe(0);
+      const plannerOptions = JSON.parse(
+        expectDefined(
+          manifest.output.split("\n").find((line) => line.startsWith("node-test-plan-options:")),
+          "Node planner invocation",
+        ).slice("node-test-plan-options:".length),
+      );
+      expect(plannerOptions).toMatchObject({
+        includeReleaseOnlyPluginShards: false,
+        includeReleaseOnlyToolingTests:
+          eventName === "workflow_dispatch" || repository !== "openclaw/openclaw",
+      });
       const rows = JSON.parse(
         expectDefined(manifest.outputs.checks_node_core_nondist_matrix, "fallback matrix"),
       ).include;
