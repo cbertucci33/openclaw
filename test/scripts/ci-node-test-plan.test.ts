@@ -5246,6 +5246,11 @@ describe("scripts/lib/ci-node-test-plan.mts", () => {
     const full = defaultShards.flatMap((shard) => shard.includePatterns ?? []);
     const automatic = createNodeTestShards({
       includeReleaseOnlyToolingTests: false,
+      changedPaths: [
+        "src/plugin-sdk/core.ts",
+        "test/scripts/ci-linux-git.test.ts",
+        "src/infra/home-dir.test.ts",
+      ],
     }).flatMap((shard) => shard.includePatterns ?? []);
     expect(full.filter((file) => file === RELEASE_REPORT_OWNER_TEST)).toHaveLength(1);
     expect(automatic).not.toContain(RELEASE_REPORT_OWNER_TEST);
