@@ -234,7 +234,7 @@ export async function handleSessionHistoryHttpRequest(
       allowRealIpFallback: cfgLocal.gateway?.allowRealIpFallback,
       cfg: cfgLocal,
     });
-    if (!currentRequestAuth.ok || requestAuth.hasCurrentClientAuthority?.() === false) {
+    if (!currentRequestAuth.ok || !requestAuth.hasCurrentClientAuthority()) {
       return false;
     }
     if (
