@@ -22,13 +22,18 @@ export function createRecoveryRuntimeFixture(params: {
       });
       const admitted = createDeferred();
       const observe = () => {
-        if (
-          targets.every(({ scope, sessionId }) => {
-            const entry = loadSessionEntry(scope);
-            return entry?.sessionId === sessionId && entry?.abortedLastRun === false;
-          })
-        ) {
-          admitted.resolve();
+        try {
+          if (
+            targets.every(({ scope, sessionId }) => {
+              const entry = loadSessionEntry(scope);
+              return entry?.sessionId === sessionId && entry?.abortedLastRun === false;
+            })
+          ) {
+            admitted.resolve();
+          }
+        } catch (error) {
+          // Session-change listeners isolate throws, so this wait must retain its read failure.
+          admitted.reject(error);
         }
       };
       const unsubscribe = sessionChanges.subscribe((change) => {
