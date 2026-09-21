@@ -668,6 +668,8 @@ describe("Crabbox authorization before final effects", () => {
           headSha,
           "--body-file",
           expect.any(String),
+          "--subject",
+          "Fixture merge headline",
         ]);
         expect(result.calls.indexOf(requests[0]!)).toBeGreaterThan(
           result.calls.indexOf(memberships[1]!),

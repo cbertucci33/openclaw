@@ -185,6 +185,8 @@ describePosix("native hosted merge handoff", () => {
       f.head,
       "--body-file",
       expect.any(String),
+      "--subject",
+      "Fixture merge headline",
     ]);
     expect(f.git(f.origin, "log", "-1", "--format=%B", "main")).toBe(
       "Fixture squash\n\nReviewed fixture body",
@@ -359,6 +361,8 @@ describePosix("native pending GitHub merge handoff", () => {
       f.head,
       "--body-file",
       expect.any(String),
+      "--subject",
+      "Fixture merge headline",
     ]);
     expect(events.filter((event) => event.kind === "required-checks")).toHaveLength(1);
     expect(
