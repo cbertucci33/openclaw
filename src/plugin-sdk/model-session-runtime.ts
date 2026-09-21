@@ -2,7 +2,7 @@
  * Runtime SDK subpath for model overrides and agent concurrency session helpers.
  */
 import {
-  applySessionModelSelection as applySessionModelSelectionInternal,
+  applySessionModelSelectionInternal,
   type ApplySessionModelSelectionParams,
   type ApplySessionModelSelectionResult,
 } from "../model-picker/apply-session-model-selection.js";

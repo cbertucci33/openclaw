@@ -21,15 +21,18 @@ export function bindHarnessModelExecution(
     readAdmittedRunOperatorAuthority(admittedRunContext),
     model,
   );
+  if (!execution) {
+    return undefined;
+  }
   let released = false;
   const release = () => {
     if (!released) {
       released = true;
       hostSignal.removeEventListener("abort", release);
-      execution?.release();
+      execution.release();
     }
   };
-  const signal = execution ? AbortSignal.any([hostSignal, execution.signal]) : hostSignal;
+  const signal = AbortSignal.any([hostSignal, execution.signal]);
   hostSignal.addEventListener("abort", release, { once: true });
   if (hostSignal.aborted) {
     release();
@@ -42,7 +45,7 @@ export function bindHarnessModelExecution(
       if (released) {
         throw new Error("agent harness model execution is no longer active");
       }
-      execution?.assertCurrent();
+      execution.assertCurrent();
     },
     release,
   });

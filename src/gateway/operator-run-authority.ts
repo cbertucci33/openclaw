@@ -5,7 +5,6 @@ import {
   type AdmittedRunOperatorAuthority,
 } from "../agents/admitted-run-context.js";
 import { prepareOperatorModelPolicy } from "../agents/operator-model-policy.js";
-import type { GatewayOperatorRoleDefinition } from "../config/types.gateway.js";
 import { getProcessGatewayPluginMetadataSnapshot } from "../plugins/current-plugin-metadata-state.js";
 import { intersectOperatorScopes, roleScopesAllow } from "../shared/operator-scope-compat.js";
 import {
@@ -24,18 +23,11 @@ import {
   resolveGatewayOperatorRoleActor,
   resolveOperatorRolePolicyForProfile,
 } from "./operator-role-policy.js";
+import { sourceRolePolicy } from "./operator-role-source-policy.js";
 import type { GatewayClient, GatewayRequestContext } from "./server-methods/shared-types.js";
 
 // Equal source tokens describe one authenticated connection, without retaining its socket or auth.
 const operatorSources = new WeakMap<GatewayClient, object>();
-
-function sourceRolePolicy(role: GatewayOperatorRoleDefinition | undefined) {
-  if (!role) {
-    return undefined;
-  }
-  const { modelPolicy: _modelPolicy, ...sourcePolicy } = role;
-  return sourcePolicy;
-}
 
 /** Transfers the original operator restriction into accepted work, independently of its request. */
 export function captureGatewayOperatorRunAuthority(params: {

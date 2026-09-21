@@ -114,6 +114,9 @@ it("binds native models to the original source without revoking surviving models
     );
     const a = bind({ provider: "fixture", model: "a" });
     const b = bind({ provider: "fixture", model: "b" });
+    if (!a || !b) {
+      throw new Error("missing operator model execution binding");
+    }
     policy = prepareOperatorModelPolicy({
       cfg,
       policy: { deny: ["fixture/a"] },
@@ -133,6 +136,9 @@ it("binds native models to the original source without revoking surviving models
     expect(b.signal.aborted).toBe(false);
     expect(b.assertCurrent).toThrow("no longer active");
     const current = bind({ provider: "fixture", model: "b" });
+    if (!current) {
+      throw new Error("missing operator model execution binding");
+    }
     host.close();
     expect(current.signal.aborted).toBe(true);
     expect(current.assertCurrent).toThrow("no longer active");

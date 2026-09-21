@@ -214,6 +214,8 @@ immediately before transport writes and result settlement, and release it after
 execution cleanup. The host retains the original operator's model policy; a
 cached pre-resume model is not authority for a different resumed model. Missing
 support rejects native-owned inference when the operator has a model policy.
+The method returns `undefined` when the run has no operator source; ordinary
+host action checks and native turn settlement retain their existing lifetimes.
 
 Read the existing private binding synchronously. Call `assertCurrent()` before
 and after the read. Do not discover models, reclaim a generation, start a client,

@@ -445,6 +445,9 @@ export async function prepareCodexAttemptConnection({ params, options }: CodexRu
     const execution = bind(model);
     releaseModelExecution();
     modelExecution = execution;
+    if (!execution) {
+      return;
+    }
     const abortModelExecution = () => abortExplicitly(execution.signal.reason);
     execution.signal.addEventListener("abort", abortModelExecution, { once: true });
     detachModelAbort = () => execution.signal.removeEventListener("abort", abortModelExecution);

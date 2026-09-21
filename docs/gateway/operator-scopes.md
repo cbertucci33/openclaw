@@ -167,6 +167,13 @@ the target agent already allows manually or through its configured primary and
 fallback chain. Automatic retries filter that chain before preparing providers;
 an empty permitted result returns an error instead of widening access.
 
+With config reload enabled, edits confined to existing roles' `modelPolicy`
+settings apply when the config transaction commits, without restarting the
+Gateway. Role additions or removals, default-role changes, and changes to scopes,
+agents, sandbox, session access, or required access-policy plugins retain their
+restart behavior, including when combined with a model-policy edit. Disabling
+config reload leaves the current policy active until config application resumes.
+
 The original role ceiling follows queued work and child runs. Accepted work must
 satisfy both its original model ceiling and the current policy. Removing one
 source model cancels its active model requests and blocks later calls using it,

@@ -197,7 +197,7 @@ function resolveActivePlacementModelSelectionError(params: {
 }
 
 /** Applies one validated picker selection to the authoritative live session. */
-export async function applySessionModelSelection(
+export async function applySessionModelSelectionInternal(
   params: InternalApplySessionModelSelectionParams,
 ): Promise<ApplySessionModelSelectionResult> {
   const startingStoreEntry = params.sessionStore[params.sessionKey];
