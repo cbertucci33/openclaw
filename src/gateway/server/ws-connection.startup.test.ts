@@ -84,6 +84,7 @@ async function attachStartupNodeConnect(params: {
 }) {
   const sent: unknown[] = [];
   const connectResponse = createDeferred<StartupConnectResponse>();
+  const setupCompletion = createDeferred<unknown>();
   const clients = new Set<unknown>();
   const socket = createGatewayWsTestSocket({
     onSend: (data) => {
@@ -132,6 +133,11 @@ async function attachStartupNodeConnect(params: {
   const requestContext = {
     ...createGatewayWsTestRequestContext(),
     nodeRegistry,
+    broadcast: vi.fn((event: string, payload: unknown) => {
+      if (event === "device.pair.setup.completed") {
+        setupCompletion.resolve(payload);
+      }
+    }),
   };
   const pendingSetup = vi.fn(params.isPendingWorkerNodeSetup);
   attachGatewayWsForTest({
@@ -218,6 +224,7 @@ async function attachStartupNodeConnect(params: {
     nodeRegistry,
     pendingSetup,
     response: connectResponse.promise,
+    setupCompletion: setupCompletion.promise,
     sent,
     socket,
   };
@@ -456,6 +463,10 @@ describe("attachGatewayWsConnectionHandler startup readiness", () => {
           destroyRequestedAtMs: null,
         });
         expect(store.hasPendingNodeEnrollmentSetup(setupId, harness.identity.deviceId)).toBe(true);
+        await expect(harness.setupCompletion).resolves.toMatchObject({
+          setupId,
+          deviceId: harness.identity.deviceId,
+        });
         harness.socket.emit("close", 1000, Buffer.from("done"));
       },
     );
@@ -537,6 +548,10 @@ describe("attachGatewayWsConnectionHandler startup readiness", () => {
           expect(response).toMatchObject({
             ok: true,
             payload: { type: "hello-ok", auth: { role: "node", scopes: [] } },
+          });
+          await expect(harness.setupCompletion).resolves.toMatchObject({
+            setupId,
+            deviceId: identity.deviceId,
           });
           await expect(readDevicePairSetupCompletion({ setupId })).resolves.toMatchObject({
             deviceId: identity.deviceId,
