@@ -12,7 +12,7 @@ import {
   resolveCachedGitHubIdentity,
   resolveUserProfileGitHubAttribution,
 } from "./user-profile-github-identity.js";
-import { listUserProfilesSync } from "./user-profile-list.js";
+import { listUserProfilesSync } from "./user-profile-identity.read.js";
 import {
   ensureProfileForEmail,
   ensureProfileForTailscaleIdentity,

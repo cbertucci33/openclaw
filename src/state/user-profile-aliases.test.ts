@@ -14,8 +14,10 @@ import {
   readUserProfileAliasRevision,
   readUserProfileVersion,
 } from "./user-profile-events.js";
-import { readUserProfileEmailBindings } from "./user-profile-identity.read.js";
-import { listUserProfilesSync } from "./user-profile-list.js";
+import {
+  listUserProfilesSync,
+  readUserProfileEmailBindings,
+} from "./user-profile-identity.read.js";
 import { ensureUserProfilesSchema } from "./user-profiles-schema.js";
 import { migrateLegacyTailscaleProfileIdentities } from "./user-profiles-tailscale-migration.js";
 import {

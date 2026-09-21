@@ -45,8 +45,6 @@ import {
 import { ensureUserProfilesSchema, UserProfileNotFoundError } from "./user-profiles-schema.js";
 import type { ProfileDisplayRow, UserProfileEmailBinding } from "./user-profiles.types.js";
 
-export { listUserProfilesSync } from "./user-profile-identity.read.js";
-
 /** Disclosure scopes need current aliases, never the resident display catalog. */
 export function readCurrentUserProfileAliases(
   profileId: string,
