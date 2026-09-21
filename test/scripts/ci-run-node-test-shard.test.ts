@@ -114,6 +114,7 @@ describe("scripts/ci-run-node-test-shard.mts", () => {
         includePatterns: ["src/one.test.ts", "src/two.test.ts"],
         shard_name: "one",
         fallbackMaxWorkers: 2,
+        minTotalMemoryBytes: 28 * 1024 ** 3,
         timing_key: "one#include-2-abcd",
       },
       { configs: ["two.config.ts"], env: { OPENCLAW_VITEST_MAX_WORKERS: "2" }, shard_name: "two" },
@@ -636,6 +637,33 @@ describe("scripts/ci-run-node-test-shard.mts", () => {
 
   it.each([
     { name: "measured host", cpus: 8, gib: 31, runner: "self-hosted", expected: "8" },
+    { name: "shared memory floor", cpus: 8, gib: 24, runner: "self-hosted", expected: "8" },
+    {
+      name: "below group memory floor",
+      cpus: 8,
+      gib: 24,
+      minGib: 28,
+      runner: "self-hosted",
+      expected: "2",
+    },
+    {
+      name: "at group memory floor",
+      cpus: 8,
+      gib: 28,
+      minGib: 28,
+      runner: "self-hosted",
+      expected: "8",
+    },
+    {
+      name: "larger host retains group cap",
+      cpus: 16,
+      gib: 31,
+      minGib: 28,
+      runner: "self-hosted",
+      cap: "8",
+      requested: "16",
+      expected: "8",
+    },
     { name: "constrained CPUs", cpus: 4, gib: 31, runner: "self-hosted", expected: "2" },
     { name: "constrained memory", cpus: 8, gib: 16, runner: "self-hosted", expected: "2" },
     { name: "hosted fallback", cpus: 8, gib: 31, runner: "github-hosted", expected: "2" },
@@ -666,7 +694,7 @@ describe("scripts/ci-run-node-test-shard.mts", () => {
     },
   ])(
     "retains the measured group's fallback ceiling on $name",
-    async ({ cpus, gib, runner, frozen, cap, parallel, expected }) => {
+    async ({ cpus, gib, minGib, runner, frozen, cap, requested, parallel, expected }) => {
       vi.spyOn(os, "availableParallelism").mockReturnValue(cpus);
       vi.spyOn(os, "totalmem").mockReturnValue(gib * 1024 ** 3);
       const runChild = vi.fn(async (_args: string[], _env: NodeJS.ProcessEnv) => 0);
@@ -675,6 +703,7 @@ describe("scripts/ci-run-node-test-shard.mts", () => {
           {
             configs: ["measured.config.ts"],
             fallbackMaxWorkers: 2,
+            minTotalMemoryBytes: minGib === undefined ? undefined : minGib * 1024 ** 3,
             env: { OPENCLAW_VITEST_MAX_WORKERS: cap },
           },
           { configs: ["ordinary.config.ts"] },
@@ -686,7 +715,7 @@ describe("scripts/ci-run-node-test-shard.mts", () => {
             CI: "true",
             RUNNER_ENVIRONMENT: runner,
             FROZEN_TARGET: frozen,
-            OPENCLAW_VITEST_MAX_WORKERS: "8",
+            OPENCLAW_VITEST_MAX_WORKERS: requested ?? "8",
             OPENCLAW_NODE_TEST_PLAN_CONCURRENCY: parallel ? "2" : "1",
           },
           scratchDir: makeScratchDir(),
@@ -695,7 +724,7 @@ describe("scripts/ci-run-node-test-shard.mts", () => {
       ).resolves.toBe(0);
       expect(runChild.mock.calls.map(([, env]) => env.OPENCLAW_VITEST_MAX_WORKERS)).toEqual([
         expected,
-        "8",
+        requested ?? "8",
       ]);
     },
   );
