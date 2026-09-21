@@ -45,6 +45,7 @@ import {
 import { readArtifactImagePage } from "./artifacts-image-page.js";
 import {
   ArtifactSessionResolutionError,
+  artifactResponseIsCurrent,
   type ArtifactQuery,
   prepareArtifactSessionResolution,
 } from "./artifacts-session-resolution.js";
@@ -505,19 +506,6 @@ async function findArtifact(
 function toSummary(artifact: ArtifactRecord): ArtifactSummary {
   const { data: _dataValue, url: _url, ...summary } = artifact;
   return summary;
-}
-
-function artifactResponseIsCurrent(found: ArtifactLookup, respond: RespondFn): boolean {
-  try {
-    found.assertCurrent?.();
-    return true;
-  } catch (error) {
-    if (!(error instanceof ArtifactSessionResolutionError)) {
-      throw error;
-    }
-    respond(false, undefined, error.shape);
-    return false;
-  }
 }
 
 async function respondManagedArtifactDownload(
