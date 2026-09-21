@@ -23,14 +23,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
-          fetch-depth: 2
+          fetch-depth: 3
           persist-credentials: false
       - name: Separate the disposable harness from the sealed product source
         shell: bash
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          test "$(git rev-parse HEAD^)" = "$SOURCE_SHA"
+          test "$(git rev-parse HEAD^)" = "31e225f770499d7f373f6d46e904f960d0dd5805"
+          test "$(git rev-parse HEAD^1^{tree})" = "b1547f9b1150ce71a6398435cea477071cc9bc0e"
           test "$(git rev-parse "$SOURCE_SHA^{tree}")" = "$SOURCE_TREE"
           test -z "$(git status --porcelain)"
           actual="$(git diff --name-only "$SOURCE_SHA" HEAD | LC_ALL=C sort)"

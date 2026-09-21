@@ -52,7 +52,10 @@ function rows(database, table, order) {
   if (!database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table)) {
     return [];
   }
-  return database.prepare(`SELECT * FROM ${table} ORDER BY ${order}`).all();
+  return database
+    .prepare(`SELECT * FROM ${table} ORDER BY ${order}`)
+    .all()
+    .map((row) => ({ ...row }));
 }
 
 function leases() {
