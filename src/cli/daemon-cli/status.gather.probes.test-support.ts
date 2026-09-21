@@ -11,6 +11,22 @@ export function callArg(mock: { mock: { calls: unknown[][] } }, index = 0): unkn
   return call[0];
 }
 
+/** Both admitted native readers settle only after the same synthetic deadline. */
+export function createExpiredNativeInspection(allowanceMs: number) {
+  let now = 0;
+  return {
+    now: () => now,
+    fail: async (timeoutMs: number | undefined, detail: string): Promise<never> => {
+      if (timeoutMs === undefined) {
+        return new Promise<never>(() => {});
+      }
+      await Promise.resolve();
+      now = allowanceMs + 1;
+      throw new Error(detail);
+    },
+  };
+}
+
 export function capturePrintedDaemonStatus(
   status: Parameters<typeof printDaemonStatus>[0],
   options: Parameters<typeof printDaemonStatus>[1],

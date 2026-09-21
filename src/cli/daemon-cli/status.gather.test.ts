@@ -46,6 +46,7 @@ import {
   callArg,
   callGatewayStatusProbe,
   capturePrintedDaemonStatus,
+  createExpiredNativeInspection,
   formatPortDiagnostics,
   inspectPortConnections,
   inspectPortUsage,
@@ -1306,26 +1307,16 @@ describe("gatherDaemonStatus", () => {
     "renders Gateway-specific timeout recovery on %s",
     async (platform) =>
       withMockedPlatform(platform, async () => {
-        let now = 0;
-        serviceIsLoaded.mockImplementationOnce(async (args?: { timeoutMs?: number }) => {
-          if (args?.timeoutMs === undefined) {
-            return await new Promise<boolean>(() => {});
-          }
-          await Promise.resolve();
-          now = 101;
-          throw new Error("systemctl is-enabled timed out");
-        });
-        serviceReadRuntime.mockImplementationOnce(async (_env, opts) => {
-          if (opts?.timeoutMs === undefined) {
-            return await new Promise<{ status: string }>(() => {});
-          }
-          await Promise.resolve();
-          now = 101;
-          throw new Error("錯誤: 系統找不到指定的檔案。");
-        });
+        const inspection = createExpiredNativeInspection(100);
+        serviceIsLoaded.mockImplementationOnce((args) =>
+          inspection.fail(args?.timeoutMs, "systemctl is-enabled timed out"),
+        );
+        serviceReadRuntime.mockImplementationOnce((_env, opts) =>
+          inspection.fail(opts?.timeoutMs, "錯誤: 系統找不到指定的檔案。"),
+        );
 
         const status = await withRestoredMocks(
-          [vi.spyOn(performance, "now").mockImplementation(() => now)],
+          [vi.spyOn(performance, "now").mockImplementation(inspection.now)],
           () =>
             gatherStatus({
               rpc: { timeout: "100", json: true },

@@ -481,27 +481,20 @@ export async function readBoundedScheduledTaskProcess(
   return { port, pid };
 }
 
-/** Scheduler state remains authoritative unless an exact running process is observed. */
-async function resolveBoundedScheduledTaskRuntime(
-  env: GatewayServiceEnv,
-  deadlineMs: number,
-): Promise<Pick<GatewayServiceRuntime, "status" | "pid" | "detail"> | null> {
-  const observed = await readBoundedScheduledTaskProcess(env, deadlineMs);
-  return observed?.pid
-    ? {
-        status: "running",
-        pid: observed.pid,
-        detail: `Matching installed process detected for gateway port ${observed.port}.`,
-      }
-    : null;
-}
-
 export async function resolveListenerBackedScheduledTaskRuntime(
   env: GatewayServiceEnv,
   deadlineMs?: number,
 ): Promise<Pick<GatewayServiceRuntime, "status" | "pid" | "detail"> | null> {
   if (deadlineMs !== undefined) {
-    return resolveBoundedScheduledTaskRuntime(env, deadlineMs);
+    // Scheduler state remains authoritative without an exact running process.
+    const observed = await readBoundedScheduledTaskProcess(env, deadlineMs);
+    return observed?.pid
+      ? {
+          status: "running",
+          pid: observed.pid,
+          detail: `Matching installed process detected for gateway port ${observed.port}.`,
+        }
+      : null;
   }
   if (!shouldManageGatewayListenerPort(env)) {
     const matched = await resolveScheduledTaskNodeHostProcess(env);
