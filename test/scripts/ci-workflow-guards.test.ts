@@ -14583,7 +14583,16 @@ printf '%s\n' "\${CURL_SUCCESS_IP:-203.0.113.7}"
       ).include;
       expect(rows).toHaveLength(1);
       expect(rows[0].check_name).toBe("bundled-node-plan");
-      expect(rows[0].includePatterns).toEqual(forwardsChangedPaths ? changedPaths : undefined);
+      const plans = resolveShardPlans({
+        OPENCLAW_NODE_TEST_GROUPS_GZIP_BASE64: rows[0].groups_gzip_base64,
+        OPENCLAW_NODE_TEST_CONFIGS_JSON: JSON.stringify(rows[0].configs),
+        OPENCLAW_NODE_TEST_INCLUDE_PATTERNS_JSON: JSON.stringify(rows[0].includePatterns),
+      });
+      expect(plans).toHaveLength(1);
+      const plan = expectDefined(plans[0], "resolved fallback plan");
+      expect(plan.kind === "group" ? plan.plan.includePatterns : undefined).toEqual(
+        forwardsChangedPaths ? changedPaths : null,
+      );
     },
   );
 
@@ -16913,99 +16922,162 @@ printf '%s\n' "\${CURL_SUCCESS_IP:-203.0.113.7}"
     ]);
   });
 
-  it("packs grouped Node matrix rows and unpacks them in the shard runner", () => {
-    const groups = [
-      {
-        configs: ["test/vitest/vitest.unit-fast.config.ts"],
-        env: undefined,
-        fallbackMaxWorkers: 2,
-        includePatterns: ["src/a.test.ts", "src/b.test.ts"],
-        requiresDist: false,
-        runner: "ubuntu-24.04",
-        shard_name: "core-unit-fast-1",
-        timing_key: "core-unit-fast-1#include-2-abcd",
-      },
-      {
-        configs: ["test/vitest/vitest.infra.config.ts"],
-        env: { OPENCLAW_VITEST_MAX_WORKERS: "2" },
-        requiresDist: false,
-        runner: "ubuntu-24.04",
-        shard_name: "core-runtime-infra-misc",
-      },
-    ];
-    const projectedGroups = groups.map(
-      ({ configs, env, fallbackMaxWorkers, includePatterns, shard_name, timing_key }) => ({
-        configs,
-        env,
-        fallbackMaxWorkers,
-        includePatterns,
-        shard_name,
-        timing_key,
-      }),
-    );
-    const manifest = runCiManifestFixture({
-      bundledPlanner: true,
-      nodeTestShards: [
+  it.each(["grouped", "single-env", "single-no-env"] as const)(
+    "packs Node matrix rows and unpacks them in the shard runner (%s)",
+    (mode) => {
+      const grouped = mode === "grouped";
+      const groups = [
         {
-          checkName: "checks-node-compact-small-1",
-          groups,
+          configs: ["test/vitest/vitest.unit-fast.config.ts"],
+          env: undefined,
+          fallbackMaxWorkers: 2,
+          includePatterns: ["src/a.test.ts", "src/b.test.ts"],
           requiresDist: false,
           runner: "ubuntu-24.04",
-          shardName: "compact-small-1",
+          shard_name: "core-unit-fast-1",
+          timing_key: "core-unit-fast-1#include-2-abcd",
         },
-      ],
-    });
-    expect(manifest.status, manifest.output).toBe(0);
-    const [row] = JSON.parse(
-      expectDefined(manifest.outputs.checks_node_core_nondist_matrix, "packed Node matrix"),
-    ).include;
-    expect(row).toMatchObject({
-      check_name: "checks-node-compact-small-1",
-      groups_gzip_base64: expect.any(String),
-      requires_go: false,
-    });
-    expect(row).not.toHaveProperty("groups");
-    const runStep = readCiWorkflow().jobs["checks-node-core-test-nondist-shard"].steps.find(
-      (step: WorkflowStep) => step.name === "Run Node test shard",
-    );
-    const context = {
-      eventName: "pull_request" as const,
-      matrix: row,
-      repository: "openclaw/openclaw",
-      runAttempt: 1,
-    };
-    const packedEnv = evaluateWorkflowExpression(
-      runStep.env.OPENCLAW_NODE_TEST_GROUPS_GZIP_BASE64,
-      context,
-    );
-    const legacyEnv = evaluateWorkflowExpression(
-      runStep.env.OPENCLAW_NODE_TEST_GROUPS_JSON,
-      context,
-    );
-    expect(legacyEnv).toBe("");
-    expect(
-      resolveShardPlans({ OPENCLAW_NODE_TEST_GROUPS_GZIP_BASE64: String(packedEnv) }).map((plan) =>
-        plan.kind === "group" ? plan.plan : plan,
-      ),
-    ).toEqual(projectedGroups);
-  });
-
-  it.each(["github", "hybrid", "blacksmith"] as const)(
-    "keeps the complete %s manifest output below the safety budget",
-    (runnerProfile) => {
+        {
+          configs: ["test/vitest/vitest.infra.config.ts"],
+          env: { OPENCLAW_VITEST_MAX_WORKERS: "2" },
+          requiresDist: false,
+          runner: "ubuntu-24.04",
+          shard_name: "core-runtime-infra-misc",
+        },
+      ];
+      const firstGroup = expectDefined(groups[0], "first compact group");
+      const singleGroup = {
+        configs: firstGroup.configs,
+        env:
+          mode === "single-no-env"
+            ? undefined
+            : {
+                OPENCLAW_VITEST_MAX_WORKERS: "2",
+                OPENCLAW_NODE_TEST_VITEST_ARGS_JSON: '["--shard=1/2"]',
+              },
+        includePatterns: firstGroup.includePatterns,
+        shard_name: "core-unit-fast-1",
+      };
+      const projectedGroups = grouped
+        ? groups.map(
+            ({ configs, env, fallbackMaxWorkers, includePatterns, shard_name, timing_key }) => ({
+              configs,
+              env,
+              fallbackMaxWorkers,
+              includePatterns,
+              shard_name,
+              timing_key,
+            }),
+          )
+        : [singleGroup];
       const manifest = runCiManifestFixture({
         bundledPlanner: true,
+        nodeTestShards: [
+          {
+            checkName: "checks-node-compact-small-1",
+            ...(grouped
+              ? { groups }
+              : {
+                  configs: singleGroup.configs,
+                  env: singleGroup.env,
+                  includePatterns: singleGroup.includePatterns,
+                }),
+            requiresDist: false,
+            runner: "ubuntu-24.04",
+            shardName: grouped ? "compact-small-1" : singleGroup.shard_name,
+          },
+        ],
+      });
+      expect(manifest.status, manifest.output).toBe(0);
+      const [row] = JSON.parse(
+        expectDefined(manifest.outputs.checks_node_core_nondist_matrix, "packed Node matrix"),
+      ).include;
+      expect(row).toMatchObject({
+        check_name: "checks-node-compact-small-1",
+        groups_gzip_base64: expect.any(String),
+        requires_go: false,
+      });
+      expect(row).not.toHaveProperty("groups");
+      expect(row).not.toHaveProperty("includePatterns");
+      expect(row.env).toEqual(grouped ? undefined : singleGroup.env);
+      const runStep = readCiWorkflow().jobs["checks-node-core-test-nondist-shard"].steps.find(
+        (step: WorkflowStep) => step.name === "Run Node test shard",
+      );
+      const context = {
+        eventName: "pull_request" as const,
+        matrix: row,
+        repository: "openclaw/openclaw",
+        runAttempt: 1,
+      };
+      const packedEnv = evaluateWorkflowExpression(
+        runStep.env.OPENCLAW_NODE_TEST_GROUPS_GZIP_BASE64,
+        context,
+      );
+      const legacyEnv = evaluateWorkflowExpression(
+        runStep.env.OPENCLAW_NODE_TEST_GROUPS_JSON,
+        context,
+      );
+      expect(legacyEnv).toBe("");
+      expect(
+        resolveShardPlans({ OPENCLAW_NODE_TEST_GROUPS_GZIP_BASE64: String(packedEnv) }),
+      ).toEqual(
+        resolveShardPlans(
+          grouped
+            ? {
+                OPENCLAW_NODE_TEST_GROUPS_JSON: JSON.stringify(projectedGroups),
+              }
+            : {
+                OPENCLAW_NODE_TEST_CONFIGS_JSON: JSON.stringify(singleGroup.configs),
+                OPENCLAW_NODE_TEST_ENV_JSON: JSON.stringify(singleGroup.env),
+                OPENCLAW_NODE_TEST_INCLUDE_PATTERNS_JSON: JSON.stringify(
+                  singleGroup.includePatterns,
+                ),
+                OPENCLAW_VITEST_SHARD_NAME: singleGroup.shard_name,
+              },
+        ),
+      );
+    },
+  );
+
+  it.each([
+    ...(["github", "hybrid", "blacksmith"] as const).map((runnerProfile) => ({
+      label: `${runnerProfile} compact PR`,
+      runnerProfile,
+      eventName: "pull_request" as const,
+      releaseGate: false,
+    })),
+    {
+      label: "full manual",
+      runnerProfile: "github" as const,
+      eventName: "workflow_dispatch" as const,
+      releaseGate: false,
+    },
+    {
+      label: "exact-head PR fallback",
+      runnerProfile: "github" as const,
+      eventName: "workflow_dispatch" as const,
+      releaseGate: true,
+    },
+  ])(
+    "keeps the complete $label manifest output below the safety budget",
+    ({ label, runnerProfile, eventName, releaseGate }) => {
+      const manifest = runCiManifestFixture({
+        bundledPlanner: true,
+        historicalCompatibility: false,
         changedPaths: ["src/auto-reply/full-plan.ts"],
-        eventName: "pull_request",
+        eventName,
+        releaseGate,
+        scopeEnv: { OPENCLAW_CI_WORKFLOW_REVISION: "a".repeat(40) },
         nodeTestShards: createNodeTestShardBundles({
-          compactMode: "pull-request",
+          compactMode: eventName === "pull_request" ? "pull-request" : undefined,
+          includeProofTests: eventName !== "pull_request" && !releaseGate,
           includeReleaseOnlyPluginShards: false,
           runnerBackend: runnerProfile,
         }),
         runnerProfile,
       });
       expect(manifest.status, manifest.output).toBe(0);
-      expect(manifest.outputChars, runnerProfile).toBeLessThan(262_144);
+      expect(manifest.outputChars, label).toBeLessThan(262_144);
     },
   );
 
@@ -17025,6 +17097,17 @@ printf '%s\n' "\${CURL_SUCCESS_IP:-203.0.113.7}"
       bundledPlanner: true,
       historicalCompatibility: false,
       nodeTestGroupsCodec: false,
+      nodeTestShards: [
+        {
+          checkName: "bundled-node-plan",
+          configs: ["test/vitest/vitest.infra.config.ts"],
+          env: { OPENCLAW_VITEST_MAX_WORKERS: "2" },
+          includePatterns: ["src/legacy.test.ts"],
+          requiresDist: false,
+          runner: "ubuntu-24.04",
+          shardName: "bundled-node-plan",
+        },
+      ],
     });
     expect(ungrouped.status, ungrouped.output).toBe(0);
     expect(ungrouped.outputs.frozen_target).toBe("true");
@@ -17034,6 +17117,8 @@ printf '%s\n' "\${CURL_SUCCESS_IP:-203.0.113.7}"
     ).include;
     expect(rows).toEqual([expect.objectContaining({ check_name: "bundled-node-plan" })]);
     expect(rows[0]).not.toHaveProperty("groups_gzip_base64");
+    expect(rows[0].includePatterns).toEqual(["src/legacy.test.ts"]);
+    expect(rows[0].env).toEqual({ OPENCLAW_VITEST_MAX_WORKERS: "2" });
 
     const grouped = runCiManifestFixture({
       bundledPlanner: true,

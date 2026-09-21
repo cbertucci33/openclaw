@@ -1745,12 +1745,12 @@ jobs:
                   ...changedExtensionFallbackShards,
                 ]
             : [];
-          // Grouped rows list every striped test file. Current targets pack the
-          // projected runner contract; older targets retain the same projection
-          // as legacy JSON because their shard runner predates the codec.
+          // Both compact groups and full-plan rows list test files explicitly.
+          // Pack the existing runner contract without changing process envelopes;
+          // older targets retain their codec-free representation.
           const nodeTestGroupsCodecPath = "./scripts/lib/ci-node-test-groups-codec.mts";
           const nodeTestGroupsCodec =
-            rawNodeTestShards.some((shard) => shard.groups) &&
+            rawNodeTestShards.some((shard) => shard.groups || shard.includePatterns) &&
             existsSync(nodeTestGroupsCodecPath)
               ? await importTargetPlan(nodeTestGroupsCodecPath)
               : null;
@@ -1789,7 +1789,16 @@ jobs:
           const nodeTestShards = rawNodeTestShards
             .toSorted((a, b) => (b.predictedSeconds ?? 0) - (a.predictedSeconds ?? 0))
             .map((shard) => {
-              const groups = shard.groups?.map(projectNodeTestGroup);
+              const groups = shard.groups?.map(projectNodeTestGroup) ?? (
+                nodeTestGroupsCodec && !shard.targets?.length && shard.includePatterns
+                  ? [{
+                      configs: shard.configs,
+                      env: shard.env ?? null,
+                      includePatterns: shard.includePatterns,
+                      shard_name: shard.shardName,
+                    }]
+                  : undefined
+              );
               return {
                 check_name: shard.checkName,
                 runtime: "node",
@@ -1802,7 +1811,8 @@ jobs:
                 groups: groups && !nodeTestGroupsCodec ? groups : undefined,
                 configs: shard.configs,
                 env: shard.env,
-                includePatterns: shard.includePatterns,
+                includePatterns:
+                  groups && !shard.groups && nodeTestGroupsCodec ? undefined : shard.includePatterns,
                 pretest_build_mode: shard.pretestBuildMode,
                 git_commits: resolveTestGitCommits(shard),
                 requires_dist: shard.requiresDist,
