@@ -448,10 +448,7 @@ describe("runtime placement observations", () => {
                 original.checkName === job.checkName &&
                 original.groups.some((group) => group.configs.includes(gatewayFixtureConfig)) &&
                 original.pretestBuildMode === undefined &&
-                original.planConcurrency === 1 &&
-                original.groups.some((group) =>
-                  group.configs.includes("test/vitest/vitest.gateway-methods-isolated.config.ts"),
-                ),
+                original.planConcurrency === 1,
             ),
           )!;
           expect(recipient, "serial Gateway recipient").toBeDefined();
@@ -480,9 +477,7 @@ describe("runtime placement observations", () => {
         );
         expect(crossing.length).toBeGreaterThan(0);
         for (const group of crossing) {
-          const measuredGateway =
-            gatewayRecipient &&
-            group.configs.includes("test/vitest/vitest.gateway-methods-isolated.config.ts");
+          const measuredGateway = gatewayRecipient && group.configs.includes(gatewayFixtureConfig);
           expect(group.env?.OPENCLAW_VITEST_MAX_WORKERS, group.shard_name).toBe(
             measuredGateway ? "8" : "2",
           );
