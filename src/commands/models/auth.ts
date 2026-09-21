@@ -1,6 +1,7 @@
 /** Commands for adding, pasting, and logging into provider model auth profiles. */
 import {
   cancel,
+  type CANCEL_SYMBOL,
   confirm as clackConfirm,
   isCancel,
   password as clackPassword,
@@ -104,7 +105,7 @@ function resolveManualTokenExpiryMs(expiresIn: string | undefined): number | und
   return expires;
 }
 
-function guardCancel<T>(value: T | symbol): T {
+function guardCancel<T>(value: T | typeof CANCEL_SYMBOL): T {
   if (typeof value === "symbol" || isCancel(value)) {
     cancel("Cancelled.");
     process.exit(0);
