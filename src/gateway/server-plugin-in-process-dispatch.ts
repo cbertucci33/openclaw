@@ -25,7 +25,13 @@ import {
   resolveGatewayOperatorRoleActor,
 } from "./operator-role-policy.js";
 import { captureGatewayOperatorRunAuthority } from "./operator-run-authority.js";
-import { ADMIN_SCOPE, WRITE_SCOPE } from "./operator-scopes.js";
+import {
+  ADMIN_SCOPE,
+  READ_SCOPE,
+  SESSION_READ_SCOPE,
+  SESSION_WRITE_SCOPE,
+  WRITE_SCOPE,
+} from "./operator-scopes.js";
 import {
   dispatchGatewayRequestInProcessRaw,
   type GatewayMethodDispatchResponse,
@@ -169,6 +175,8 @@ type DispatchGatewayMethodInProcessOptions = {
   sessionCreation?: TrustedSessionCreation;
   requireScopedClient?: boolean;
   syntheticScopes?: string[];
+  /** Built-in adapters distinguish method minima from explicit scope restrictions. */
+  syntheticScopeMode?: "minimum" | "exact";
   timeoutMs?: number;
   signal?: AbortSignal;
   hasCurrentClientAuthority?: GatewayRequestOptions["hasCurrentClientAuthority"];
@@ -294,15 +302,40 @@ function resolveInProcessGatewayDispatch(
   const delegatedToolPolicyHandoffId = options?.delegatedToolPolicyHandoff
     ? registerSubagentCompletionToolHandoff(options.delegatedToolPolicyHandoff)
     : undefined;
-  const requestedSyntheticScopes = options?.syntheticScopes ?? [WRITE_SCOPE];
-  const operatorScopes =
+  // Built-in requests retain the explicit ceiling of a positively scoped System caller.
+  const scopedSystemScopes =
+    options?.syntheticScopeMode !== undefined && scopedActor?.kind === "system"
+      ? (scope?.client?.connect.scopes ?? [])
+      : undefined;
+  const sourceScopes =
     operatorRunAuthority && scope?.client && matchesOperatorSource
       ? intersectOperatorScopes(operatorRunAuthority.scopes, scope.client.connect.scopes ?? [])
       : (operatorRunAuthority?.scopes ??
         operatorAuthority?.scopes ??
+        (options?.syntheticScopeMode !== undefined
+          ? inheritedOperatorAuthority?.scopes
+          : undefined) ??
         (operatorRoleActor?.kind === "operator"
           ? (verifiedOperatorAuthority?.scopes ?? scope?.client?.connect.scopes ?? [])
           : undefined));
+  const operatorScopes =
+    scopedSystemScopes && sourceScopes
+      ? intersectOperatorScopes(sourceScopes, scopedSystemScopes)
+      : (scopedSystemScopes ?? sourceScopes);
+  const requestedSyntheticScopes = (options?.syntheticScopes ?? [WRITE_SCOPE]).map((requested) => {
+    const broad =
+      requested === SESSION_READ_SCOPE
+        ? READ_SCOPE
+        : requested === SESSION_WRITE_SCOPE
+          ? WRITE_SCOPE
+          : undefined;
+    return options?.syntheticScopeMode === "minimum" &&
+      broad &&
+      operatorScopes &&
+      roleScopesAllow({ role: "operator", requestedScopes: [broad], allowedScopes: operatorScopes })
+      ? broad
+      : requested;
+  });
   // Narrow by authority, not literal membership: write also authorizes reads
   // and Talk, including tools called by a synthetic continuation.
   const syntheticScopes = operatorScopes
@@ -314,7 +347,11 @@ function resolveInProcessGatewayDispatch(
         }),
       )
     : options?.syntheticScopes;
-  if (operatorScopes?.includes(ADMIN_SCOPE) && !syntheticScopes?.includes(ADMIN_SCOPE)) {
+  if (
+    options?.syntheticScopeMode !== "exact" &&
+    operatorScopes?.includes(ADMIN_SCOPE) &&
+    !syntheticScopes?.includes(ADMIN_SCOPE)
+  ) {
     syntheticScopes?.push(ADMIN_SCOPE);
   }
   const baseSyntheticClient = createSyntheticPluginRuntimeClient({

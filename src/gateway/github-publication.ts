@@ -47,6 +47,7 @@ import {
   readGitHubPublicationRequest,
   type GitHubPublicationRow as PublicationRow,
 } from "./github-publication-store.js";
+import { assertGitHubPublicationWorkflowChangesAllowed } from "./github-publication-workflows.js";
 import { createRepositoryGitHubPublicationCoordinator } from "./github-repository-publication.js";
 import { loadGatewaySessionEntryReadOnly } from "./session-utils.js";
 import type {
@@ -324,11 +325,19 @@ export function createGitHubPublicationCoordinator(params: {
           let effect: SessionGitHubPublicationResult["effect"];
           let dispatched = false;
           let requester: Awaited<ReturnType<typeof restoreGitHubPublicationRequester>> | undefined;
+          const getRequester = () => {
+            if (!requester) {
+              throw new GitHubPublicationRequesterUnavailableError();
+            }
+            return requester;
+          };
           try {
             assertOwned();
             return await executeGitHubPublication({
               initial: claimed,
               validateCustody,
+              assertWorkflowChangesAllowed: () =>
+                assertGitHubPublicationWorkflowChangesAllowed(getRequester()),
               prepareAuthority: async () => {
                 requester = await restoreGitHubPublicationRequester(
                   readGitHubPublicationSessionLifecycle({
@@ -343,10 +352,7 @@ export function createGitHubPublicationCoordinator(params: {
                 if (!validateCustody()) {
                   return false;
                 }
-                if (!requester) {
-                  throw new GitHubPublicationRequesterUnavailableError();
-                }
-                requester.assertCurrent();
+                getRequester().assertCurrent();
                 assertInvocationCurrent?.();
                 return true;
               },

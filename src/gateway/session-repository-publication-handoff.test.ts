@@ -8,6 +8,7 @@ import { managedWorktrees } from "../agents/worktrees/service.js";
 import { loadSessionEntry, upsertSessionEntryCore } from "../config/sessions/session-accessor.js";
 import * as backoff from "../infra/backoff.js";
 import { registerClonedProjectRegistry } from "../projects/project-registry.test-support.js";
+import { readGitHubPublicationSessionLifecycle } from "../state/github-publication-session-lifecycles.js";
 import {
   openOpenClawStateDatabase,
   runOpenClawStateWriteTransaction,
@@ -16,6 +17,7 @@ import { OpenClawStateLeaseError } from "../state/openclaw-state-lease.js";
 import { getSessionRepositoryWorkspaceStore } from "../state/session-repository-workspaces.js";
 import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
 import { executeGitHubPublication } from "./github-publication-executor.js";
+import { restoreGitHubPublicationRequester } from "./github-publication-requester.js";
 import {
   ensureGitHubPublicationStore,
   insertGitHubPublicationRequest,
@@ -23,6 +25,7 @@ import {
   createGitHubPublicationExecutionStore,
   projectGitHubPublicationResult,
 } from "./github-publication-store.js";
+import { assertGitHubPublicationWorkflowChangesAllowed } from "./github-publication-workflows.js";
 import { REMOTE_GITHUB_PUBLICATION_SNAPSHOT_JS } from "./github-repository-publication-snapshot.js";
 import {
   insertRepositoryGitHubPublication,
@@ -405,14 +408,25 @@ it.each([
       );
       const initial = claimGitHubPublicationExecution(requestId, "local-instance");
       const execution = createGitHubPublicationExecutionStore("local-instance");
+      const requester = await restoreGitHubPublicationRequester(
+        readGitHubPublicationSessionLifecycle({ publicationKind: "shared", requestId })
+          ?.requester_authority_json,
+        scope,
+        () => cfg,
+      );
       const published = await executeGitHubPublication({
         initial,
         ...execution,
         identity: { prepare: async () => identity, isCurrent: () => true },
-        validateAuthority: () => true,
         validateCustody: () => true,
+        validateAuthority: () => {
+          requester.assertCurrent();
+          return true;
+        },
+        assertWorkflowChangesAllowed: () =>
+          assertGitHubPublicationWorkflowChangesAllowed(requester),
         projectResult: projectGitHubPublicationResult,
-      });
+      }).finally(requester.release);
       const localHead = git(worktree.path, "rev-parse", "HEAD");
       const receipt = {
         baseCommit,

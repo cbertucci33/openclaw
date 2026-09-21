@@ -41,6 +41,8 @@ import {
   githubPublicationPushArgs,
   githubPublicationRemoteHeadArgs,
   githubPublicationUpdateRefArgs,
+  hasGitHubPublicationWorkflowChanges,
+  requirePublicationCommand as requireCommand,
   runPublicationCommand as runCommand,
 } from "./github-publication-git-transport.js";
 import {
@@ -54,6 +56,7 @@ import {
   type GitHubPublicationExecutionRow,
 } from "./github-publication-store.js";
 import { prepareGitHubPublicationTarget } from "./github-publication-target.js";
+import { prepareGitHubPublicationWorkflowGuard } from "./github-publication-workflows.js";
 import { GatewayOperatorAccessUnavailableError } from "./operator-access-policy.js";
 import { SessionMutationAuthorizationChangedError } from "./session-sharing.js";
 
@@ -172,6 +175,7 @@ export async function executeGitHubPublication<Row extends PublicationRow>(param
   validateAuthority: () => boolean;
   prepareAuthority?: () => Promise<void>;
   validateCustody: () => boolean;
+  assertWorkflowChangesAllowed: () => void;
   projectResult: (row: Row) => SessionGitHubPublicationResult;
   bindWorkspaceSnapshot: (input: {
     row: Row;
@@ -394,7 +398,8 @@ export async function executeGitHubPublication<Row extends PublicationRow>(param
     };
     // Observe ancestry before creating bookkeeping commits or installing the accepted index.
     // Fetch objects only: do not move local refs, FETCH_HEAD, or the working tree.
-    let remoteHead = await step(observeRemoteHead);
+    const expectedRemoteHead = await step(observeRemoteHead);
+    let remoteHead = expectedRemoteHead;
     if (remoteHead && remoteHead !== headCommit) {
       const fetched = await run(githubPublicationBaseFetchArgs(pushRepository, remoteHead), {
         cwd: worktree.path,
@@ -414,6 +419,21 @@ export async function executeGitHubPublication<Row extends PublicationRow>(param
       }
     }
     const existingPullRequest = await step(findPullRequest);
+    const assertWorkflowAuthority = await prepareGitHubPublicationWorkflowGuard(
+      params.assertWorkflowChangesAllowed,
+      () =>
+        hasGitHubPublicationWorkflowChanges({
+          cwd: worktree.path,
+          comparisonCommit: expectedRemoteHead || lineage.stdout.toString("utf8").trim(),
+          workspaceTree,
+          run,
+        }),
+    );
+    const assertAction = () => {
+      assertAuthority();
+      assertWorkflowAuthority();
+    };
+    assertAction();
     row = params.updatePublishingFacts({
       row,
       repository,
@@ -481,10 +501,11 @@ export async function executeGitHubPublication<Row extends PublicationRow>(param
         GIT_AUTHOR_DATE: timestamp,
         GIT_COMMITTER_DATE: timestamp,
       };
-      const commit = await command(
+      const commit = await requireCommand(
         ["git", "commit-tree", "--no-gpg-sign", workspaceTree, "-p", headCommit],
-        { cwd: worktree.path, env: authorEnv, input: `${message}\n` },
+        { cwd: worktree.path, env: authorEnv, input: `${message}\n`, beforeRun: assertAction },
       );
+      assertAuthority();
       await assertGitHubPublicationBranchRef(
         branch,
         async (argv) => (await run(argv, { cwd: worktree.path })).code ?? -1,
@@ -530,13 +551,20 @@ export async function executeGitHubPublication<Row extends PublicationRow>(param
       GIT_CONFIG_GLOBAL: gitNullConfigPath(),
       GIT_CONFIG_SYSTEM: gitNullConfigPath(),
     };
-    const pushArgs = githubPublicationPushArgs(httpsRemote, headCommit, branch);
+    const pushArgs = githubPublicationPushArgs(httpsRemote, headCommit, branch, expectedRemoteHead);
     remoteHead = await step(observeRemoteHead);
     if (remoteHead !== headCommit) {
-      assertAuthority();
+      if (remoteHead !== expectedRemoteHead) {
+        throw new GitHubPublicationBranchChangedError();
+      }
+      assertAction();
       params.recordEffect?.("push");
       effectDispatched = true;
-      const pushed = await runCommand(pushArgs, { cwd: worktree.path, env: transportEnv });
+      const pushed = await runCommand(pushArgs, {
+        cwd: worktree.path,
+        env: transportEnv,
+        beforeRun: assertAction,
+      });
       params.recordEffect?.("push", pushed.code === 0 ? { headCommit } : {});
       assertAuthority();
       identity = await refreshIdentity();
@@ -578,12 +606,13 @@ export async function executeGitHubPublication<Row extends PublicationRow>(param
         : "";
       const body = `${description}${participantCredit}\n\n${pullRequestMarker}${footer}`;
       identity = await refreshIdentity();
-      assertAuthority();
+      assertAction();
       params.recordEffect?.("pull_request");
       pullRequestPending = true;
       effectDispatched = true;
       const created = await runCommand(githubPublicationCreatePullRequestArgs(repository), {
         env: identity.env,
+        beforeRun: assertAction,
         input: JSON.stringify({
           title: row.title?.trim() || `Publish ${branch}`,
           body,

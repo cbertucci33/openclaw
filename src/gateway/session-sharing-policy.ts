@@ -13,6 +13,7 @@ import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { isIncognitoSessionKey } from "../routing/session-key.js";
 import {
   authorizeGatewaySessionCreation,
+  hasSessionOnlyWriteAuthority,
   operatorSessionCap,
   resolveGatewayOperatorRoleActor,
   resolveOperatorRolePolicy,
@@ -167,6 +168,11 @@ export type SessionSharingRoleParams = {
   isMember?: boolean;
 };
 
+type PreparedSessionSharingPolicy = {
+  value: ReturnType<typeof operatorSessionCap>;
+  sessionOnlyWriteAuthority: boolean;
+};
+
 export function sharingIdentity(
   client: GatewayClient | null,
   actor: ReturnType<typeof resolveGatewayOperatorRoleActor>,
@@ -180,7 +186,7 @@ export function sharingIdentity(
 
 export function resolveSessionSharingRole(
   params: SessionSharingRoleParams,
-  preparedCap?: { value: ReturnType<typeof operatorSessionCap> },
+  preparedCap?: PreparedSessionSharingPolicy,
   isCreator?: ReturnType<typeof prepareSessionCreatorProfile>,
 ): SessionSharingRole {
   if (isGatewayAdmin(params.client)) {
@@ -198,6 +204,12 @@ export function resolveSessionSharingRole(
   const creatorMatches = isCreator ?? prepareSessionCreatorProfile(identity.id);
   if (creatorMatches(params.target.entry.createdActor)) {
     return "owner";
+  }
+  if (
+    preparedCap?.sessionOnlyWriteAuthority ??
+    (params.cfg && hasSessionOnlyWriteAuthority(params.client, params.cfg))
+  ) {
+    return "viewer";
   }
   const sessionCap = preparedCap
     ? preparedCap.value
@@ -365,17 +377,22 @@ export function authorizeSessionAgentRun(params: {
 
 export function authorizeSessionSharingTarget(
   params: SessionSharingRoleParams,
-  prepared?: { value: ReturnType<typeof operatorSessionCap>; role: SessionSharingRole },
+  prepared?: PreparedSessionSharingPolicy & { role: SessionSharingRole },
 ): ErrorShape | null {
   const visibility = resolveSessionVisibility(params.target.entry);
   const sessionCap = prepared
     ? prepared.value
     : params.cfg && operatorSessionCap(params.client, params.cfg);
-  const role = prepared?.role ?? resolveSessionSharingRole(params, { value: sessionCap });
+  const sessionOnlyWriteAuthority =
+    prepared?.sessionOnlyWriteAuthority ??
+    (params.cfg !== undefined && hasSessionOnlyWriteAuthority(params.client, params.cfg));
+  const role =
+    prepared?.role ??
+    resolveSessionSharingRole(params, { value: sessionCap, sessionOnlyWriteAuthority });
   if (sessionCap === "none" && role !== "owner" && role !== "admin") {
     return hiddenSessionNotFound(params.target.canonicalKey);
   }
-  const capped = sessionCap === "view" || sessionCap === "suggest";
+  const capped = sessionCap === "view" || sessionCap === "suggest" || sessionOnlyWriteAuthority;
   // Draft membership is inactive, while an explicit role caps even shared visibility.
   const canMutate =
     visibility === "draft"
