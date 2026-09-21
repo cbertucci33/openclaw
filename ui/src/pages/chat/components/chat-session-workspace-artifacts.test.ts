@@ -1,4 +1,6 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { Blob as NodeBlob } from "node:buffer";
+import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
+import { createDeferred } from "../../../../../test/helpers/promise.js";
 import {
   gatewayHello,
   loadedSidebarContent,
@@ -8,10 +10,17 @@ import {
   createSessionWorkspaceProps,
   type SessionWorkspaceHost,
 } from "./chat-session-workspace.ts";
-import type { SidebarContent } from "./chat-sidebar-content-types.ts";
+import type { AttachmentSidebarRuntime, SidebarContent } from "./chat-sidebar-content-types.ts";
 
 describe("session workspace artifacts", () => {
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    if (vi.isFakeTimers()) {
+      vi.runOnlyPendingTimers();
+      vi.useRealTimers();
+    }
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
 
   function createArtifactHost(params: {
     data: string;
@@ -58,6 +67,176 @@ describe("session workspace artifacts", () => {
     } as unknown as SessionWorkspaceHost;
     return { handleOpenSidebar, request, state, fetchMock, url: `/mount${url}` };
   }
+
+  async function createBinaryArtifactPanel() {
+    // jsdom's Blob lacks arrayBuffer; binary download tests need the native byte contract.
+    vi.stubGlobal("Blob", NodeBlob);
+    const fixture = createArtifactHost({
+      data: "UEsAAQ==",
+      mimeType: "application/zip",
+      title: "archive.zip",
+      http: true,
+    });
+    fixture.state.connectionEpoch = 1;
+    const artifact = {
+      id: "artifact-1",
+      type: "file",
+      title: "archive.zip",
+      mimeType: "application/zip",
+      download: { mode: "url" },
+    };
+    let ticket = 0;
+    fixture.request.mockImplementation(async (_method, params) => ({
+      artifact,
+      ...(params.transport === "http"
+        ? {
+            url: `/api/artifacts/download/connection/ticket-${++ticket}`,
+            expiresAt: new Date(Date.now() + 300_000).toISOString(),
+          }
+        : { encoding: "base64", data: "UEsAAQ==" }),
+    }));
+    const props = createSessionWorkspaceProps(fixture.state);
+    props.onOpenArtifact("artifact-1");
+    const content = await loadedSidebarContent(fixture.state);
+    if (content.kind !== "attachment" || !content.download) {
+      throw new Error("Binary artifact must expose a download action");
+    }
+    const panel = document.createElement("openclaw-chat-detail-panel") as HTMLElement & {
+      content: SidebarContent;
+      attachmentRuntime: AttachmentSidebarRuntime;
+      updateComplete: Promise<unknown>;
+    };
+    panel.content = content;
+    panel.attachmentRuntime = { connectionEpoch: 1, sessionKey: fixture.state.sessionKey };
+    document.body.append(panel);
+    onTestFinished(() => panel.remove());
+    await panel.updateComplete;
+    const button = panel.querySelector<HTMLButtonElement>(
+      "button.chat-assistant-attachment-card__download",
+    );
+    if (!button) {
+      throw new Error("Binary artifact must render the attachment download action");
+    }
+    const saved = createDeferred<Blob>();
+    const NativeURL = URL;
+    const createObjectURL = vi.fn((blob: Blob) => {
+      saved.resolve(blob);
+      return "blob:artifact-download";
+    });
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal(
+      "URL",
+      class extends NativeURL {
+        static override createObjectURL = createObjectURL;
+        static override revokeObjectURL = revokeObjectURL;
+      },
+    );
+    const clicked: HTMLAnchorElement[] = [];
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(
+      function (this: HTMLAnchorElement) {
+        clicked.push(this);
+      },
+    );
+    return {
+      ...fixture,
+      artifact,
+      props,
+      content,
+      panel,
+      button,
+      saved,
+      createObjectURL,
+      revokeObjectURL,
+      clicked,
+    };
+  }
+
+  it.each([false, true])(
+    "reauthorizes an expired cached binary download and saves its bytes (HTTP fails: %s)",
+    async (httpFails) => {
+      const fixture = await createBinaryArtifactPanel();
+      expect(fixture.fetchMock).not.toHaveBeenCalled();
+      const bytes = new Uint8Array([80, 75, 0, 1]);
+      const blob = new Blob([bytes], { type: "application/zip" });
+      fixture.fetchMock.mockImplementation(async () => {
+        if (httpFails) {
+          throw new TypeError("HTTP media is unreachable");
+        }
+        return { ok: true, blob: async () => blob };
+      });
+      vi.useFakeTimers();
+      vi.setSystemTime(Date.now() + 360_000);
+      fixture.props.onOpenArtifact("artifact-1");
+      expect(fixture.request).toHaveBeenCalledTimes(1);
+      fixture.button.click();
+      const downloaded = await fixture.saved.promise;
+      const actualBytes = new Uint8Array(await downloaded.arrayBuffer());
+      expect(actualBytes).toEqual(bytes);
+      expect(fixture.clicked[0]?.download).toBe("archive.zip");
+      expect(fixture.fetchMock).toHaveBeenCalledExactlyOnceWith(
+        "/mount/api/artifacts/download/connection/ticket-2",
+        {
+          credentials: "same-origin",
+          redirect: "error",
+          signal: expect.any(AbortSignal),
+        },
+      );
+      expect(fixture.request.mock.calls.map(([, params]) => params)).toEqual([
+        {
+          sessionKey: fixture.state.sessionKey,
+          agentId: "main",
+          artifactId: "artifact-1",
+          transport: "http",
+        },
+        {
+          sessionKey: fixture.state.sessionKey,
+          agentId: "main",
+          artifactId: "artifact-1",
+          transport: "http",
+        },
+        ...(httpFails
+          ? [{ sessionKey: fixture.state.sessionKey, agentId: "main", artifactId: "artifact-1" }]
+          : []),
+      ]);
+      vi.runOnlyPendingTimers();
+      expect(fixture.revokeObjectURL).toHaveBeenCalledWith("blob:artifact-download");
+    },
+  );
+
+  it.each(["reconnect", "panel removal"])(
+    "does not save a binary download after %s",
+    async (retirement) => {
+      const fixture = await createBinaryArtifactPanel();
+      const transfer = createDeferred<{ ok: boolean; blob: () => Promise<Blob> }>();
+      const started = createDeferred();
+      fixture.fetchMock.mockImplementation(() => {
+        started.resolve();
+        return transfer.promise;
+      });
+      const read = vi.spyOn(fixture.content, "download");
+      fixture.button.click();
+      await started.promise;
+      if (retirement === "reconnect") {
+        fixture.state.connectionEpoch = 2;
+        fixture.state.client = { request: vi.fn(), gatewayUrl: "wss://control.test" } as never;
+        fixture.panel.attachmentRuntime = {
+          connectionEpoch: 2,
+          sessionKey: fixture.state.sessionKey,
+        };
+        await fixture.panel.updateComplete;
+      } else {
+        fixture.panel.remove();
+      }
+      transfer.resolve({
+        ok: true,
+        blob: async () => new Blob(["old"], { type: "application/zip" }),
+      });
+      await read.mock.results[0]?.value;
+      await fixture.panel.updateComplete;
+      expect(fixture.createObjectURL).not.toHaveBeenCalled();
+      expect(fixture.request).toHaveBeenCalledTimes(2);
+    },
+  );
 
   it.each([true, false])(
     "uses artifact titles without changing tab identity (listed: %s)",

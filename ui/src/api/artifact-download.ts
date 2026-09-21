@@ -12,7 +12,7 @@ type ArtifactDownloadHost = {
   resourceBasePath?: string;
 };
 
-function isHttpArtifactDownloadUrl(url: string, resourceBasePath = ""): boolean {
+export function isHttpArtifactDownloadUrl(url: string, resourceBasePath = ""): boolean {
   try {
     const parsed = new URL(url, globalThis.location.origin);
     const prefix = `${normalizeBasePath(resourceBasePath)}${ARTIFACT_DOWNLOAD_PATH}`;
@@ -30,6 +30,7 @@ export async function downloadArtifact(
   state: ArtifactDownloadHost,
   params: { sessionKey: string; agentId?: string; artifactId: string },
   signal?: AbortSignal,
+  options?: { readBinary?: boolean },
 ): Promise<(ArtifactDownloadResult & { blob?: Blob }) | null> {
   const client = state.client;
   const connectionEpoch = state.connectionEpoch;
@@ -69,7 +70,7 @@ export async function downloadArtifact(
   }
   const download = { ...result, url: `${normalizeBasePath(resourceBasePath ?? "")}${url}` };
   const mimeType = result.artifact.mimeType?.split(";", 1)[0]?.trim().toLowerCase() ?? "";
-  if (!/^(?:image\/|text\/|application\/json$)/u.test(mimeType)) {
+  if (!options?.readBinary && !/^(?:image\/|text\/|application\/json$)/u.test(mimeType)) {
     return download;
   }
   try {
@@ -86,7 +87,9 @@ export async function downloadArtifact(
       throw new Error(`Artifact download failed (${response.status})`);
     }
     const blob = await response.blob();
-    if (blob.type.split(";", 1)[0]?.trim().toLowerCase() !== mimeType) {
+    if (
+      blob.type.split(";", 1)[0]?.trim().toLowerCase() !== (mimeType || "application/octet-stream")
+    ) {
       throw new Error("Artifact download returned an unexpected content type");
     }
     return isCurrent() ? { ...download, blob } : null;

@@ -253,7 +253,9 @@ Gateway credential, and responses disable caching and active document execution.
 The Control UI opts in for image and text previews when served from the active
 Gateway's HTTPS origin. If the HTTP fetch fails, it retries through the inline
 RPC on that same connection. Other connections retain their existing transfer
-behavior.
+behavior. Binary artifact previews keep a Download action rather than an
+expiring link. Each click requests fresh download authority; changing the
+connection or closing the preview cancels an in-flight download.
 
 ## Use history metadata and stable anchors
 

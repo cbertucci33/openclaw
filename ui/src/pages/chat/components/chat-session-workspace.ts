@@ -1,6 +1,6 @@
 import type { SessionsDiffResult } from "../../../../../packages/gateway-protocol/src/index.js";
 import { formatFencedCodeBlock } from "../../../../../src/shared/markdown-code.js";
-import { downloadArtifact } from "../../../api/artifact-download.ts";
+import { downloadArtifact, isHttpArtifactDownloadUrl } from "../../../api/artifact-download.ts";
 import { GatewayRequestError } from "../../../api/gateway.ts";
 import type { ArtifactDownloadResult, SessionWorkspaceGetResult } from "../../../api/types.ts";
 import { hasOperatorAdminAccess } from "../../../app/operator-access.ts";
@@ -13,6 +13,7 @@ import { openWorkspaceItem } from "./chat-session-workspace-preview.ts";
 import {
   clearWorkspaceTimer,
   getSessionWorkspace,
+  isCurrentSessionWorkspace,
   loadSessionWorkspace,
   openSessionCheckoutSidebar,
   refreshSessionWorkspaceState,
@@ -124,6 +125,7 @@ function artifactSidebarContent(params: {
   url?: string;
   text?: string;
   imageSource?: string;
+  download?: (signal: AbortSignal) => Promise<Blob | null>;
 }): SidebarContent {
   const { data, encoding, mimeType, title, url, imageSource } = params;
   let { text } = params;
@@ -151,6 +153,15 @@ function artifactSidebarContent(params: {
       rawText: text,
     };
   }
+  if (params.download) {
+    return {
+      kind: "attachment",
+      attachmentKind: "document",
+      title,
+      mimeType,
+      download: params.download,
+    };
+  }
   if (url) {
     const content = `# ${title}\n\n[Open artifact](${url})`;
     return { kind: "markdown", content, rawText: content };
@@ -161,6 +172,8 @@ function artifactSidebarContent(params: {
 
 async function loadArtifactSidebarContent(
   result: ArtifactDownloadResult & { blob?: Blob },
+  download: (signal: AbortSignal) => Promise<Blob | null>,
+  resourceBasePath?: string,
 ): Promise<SidebarContent> {
   const params = {
     data: result.data,
@@ -168,6 +181,11 @@ async function loadArtifactSidebarContent(
     mimeType: result.artifact.mimeType ?? "",
     title: result.artifact.title,
     url: result.url,
+    download:
+      result.encoding === "base64" ||
+      (result.url && isHttpArtifactDownloadUrl(result.url, resourceBasePath))
+        ? download
+        : undefined,
   };
   if (!result.blob) {
     return artifactSidebarContent(params);
@@ -412,20 +430,53 @@ function openArtifact(
   workspace: SessionWorkspaceState,
   artifactId: string,
 ) {
+  const query = {
+    sessionKey: workspace.sessionKey,
+    artifactId,
+    ...(workspace.agentId ? { agentId: workspace.agentId } : {}),
+  };
+  const readDownload = async (signal: AbortSignal): Promise<Blob | null> => {
+    const currentWorkspace = getSessionWorkspace(state);
+    if (
+      currentWorkspace.sessionKey !== query.sessionKey ||
+      currentWorkspace.agentId !== workspace.agentId
+    ) {
+      return null;
+    }
+    // Cached preview actions bind a fresh connection on click; an in-flight
+    // transfer must never follow a reconnect to a replacement Gateway.
+    const client = state.client;
+    const connectionEpoch = state.connectionEpoch;
+    const result = await downloadArtifact(state, query, signal, { readBinary: true });
+    if (
+      signal.aborted ||
+      !state.connected ||
+      state.client !== client ||
+      state.connectionEpoch !== connectionEpoch ||
+      !isCurrentSessionWorkspace(state, currentWorkspace)
+    ) {
+      return null;
+    }
+    if (result?.blob) {
+      return result.blob;
+    }
+    if (result?.encoding !== "base64" || result.data === undefined) {
+      return null;
+    }
+    return new Blob([Uint8Array.from(atob(result.data), (char) => char.charCodeAt(0))], {
+      type: result.artifact.mimeType ?? "application/octet-stream",
+    });
+  };
   openWorkspaceItem(
     state,
     workspace,
     `artifact:${artifactId}`,
     async () => {
-      const result = await downloadArtifact(state, {
-        sessionKey: workspace.sessionKey,
-        artifactId,
-        ...(workspace.agentId ? { agentId: workspace.agentId } : {}),
-      });
+      const result = await downloadArtifact(state, query);
       return result?.artifact
         ? {
             artifact: result.artifact,
-            content: await loadArtifactSidebarContent(result),
+            content: await loadArtifactSidebarContent(result, readDownload, state.resourceBasePath),
           }
         : null;
     },
