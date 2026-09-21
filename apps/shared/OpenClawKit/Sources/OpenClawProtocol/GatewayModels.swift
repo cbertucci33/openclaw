@@ -1617,6 +1617,7 @@ public struct ArtifactsDownloadParams: Codable, Sendable {
     public let agentid: String?
     public let messagerole: String?
     public let artifactid: String
+    public let transport: String?
 
     public init(
         sessionkey: String? = nil,
@@ -1624,7 +1625,8 @@ public struct ArtifactsDownloadParams: Codable, Sendable {
         taskid: String? = nil,
         agentid: String? = nil,
         messagerole: String? = nil,
-        artifactid: String)
+        artifactid: String,
+        transport: String? = nil)
     {
         self.sessionkey = sessionkey
         self.runid = runid
@@ -1632,6 +1634,7 @@ public struct ArtifactsDownloadParams: Codable, Sendable {
         self.agentid = agentid
         self.messagerole = messagerole
         self.artifactid = artifactid
+        self.transport = transport
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -1641,6 +1644,7 @@ public struct ArtifactsDownloadParams: Codable, Sendable {
         case agentid = "agentId"
         case messagerole = "messageRole"
         case artifactid = "artifactId"
+        case transport
     }
 }
 
