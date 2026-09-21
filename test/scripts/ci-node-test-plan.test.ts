@@ -456,12 +456,17 @@ describe("scripts/lib/ci-node-test-plan.mts", () => {
         runner: EXTRA_LARGE_NODE_TEST_RUNNER,
         planConcurrency: 1,
         predictedSeconds: 360,
-        env: { OPENCLAW_VITEST_MAX_WORKERS: "2" },
+        env: undefined,
       });
       expect(gateway?.groups.map((group) => group.shard_name)).toEqual([
         "agentic-agents-core-runtime",
         "agentic-gateway-server-isolated",
         "agentic-agents-core-subagents",
+      ]);
+      expect(gateway?.groups.map((group) => group.env?.OPENCLAW_VITEST_MAX_WORKERS)).toEqual([
+        "2",
+        "8",
+        "2",
       ]);
       expect(jobs.filter((job) => job !== gateway).map((job) => job.predictedSeconds)).toEqual([
         440, 400,
