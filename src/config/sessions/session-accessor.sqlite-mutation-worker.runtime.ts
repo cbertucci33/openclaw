@@ -32,6 +32,7 @@ import { closeOpenClawStateDatabaseByPath } from "../../state/openclaw-state-db-
 import type { CanonicalSessionValidationResult } from "./session-accessor.sqlite-contract.js";
 import type { SqliteSessionReclamationPlan } from "./session-accessor.sqlite-lifecycle-types.js";
 import {
+  joinSqliteReclamationCommit,
   markSqliteReclamationSettled,
   waitForSqliteReclamationCommit,
 } from "./session-accessor.sqlite-reclamation-commit.js";
@@ -130,9 +131,12 @@ async function runColdMutationWorker(port: MessagePort, data: SessionColdWorkerD
               );
             },
           );
-          // The parent joins the cold transaction, not the subsequent bounded page drain.
-          markSqliteReclamationSettled(commitGate);
-          if (data.plan.kind !== "cold-restore") {
+          // A missing cold restore has no authorized transaction to join.
+          const joined = !transactionDatabase || joinSqliteReclamationCommit(commitGate);
+          if (!transactionDatabase) {
+            markSqliteReclamationSettled(commitGate);
+          }
+          if (joined && data.plan.kind !== "cold-restore") {
             await reclaimSqliteFreePages(data.plan.databaseOptions, undefined, { maxPasses: 64 });
           }
           return changed;
@@ -317,13 +321,16 @@ export async function runReclamationWorkerPort(
                   // Deferred periodic work outside this synchronous page unit still needs its relay.
                   checkpointResultOwnedByRequest =
                     request.type === "reclaim" && request.plan.kind === "maintenance-pages";
-                  const authorizeCommit = () =>
+                  let commitAuthorized = false;
+                  const authorizeCommit = () => {
                     waitForSqliteReclamationCommit(request.commitGate, () =>
                       port.postMessage({
                         type: "commit-request",
                         operationId,
                       } satisfies SqliteReclamationWorkerMessage),
                     );
+                    commitAuthorized = true;
+                  };
                   const reclaimed =
                     request.type === "canonical-validation"
                       ? runOpenClawAgentWriteTransaction(
@@ -376,7 +383,18 @@ export async function runReclamationWorkerPort(
                       : reclaimSqliteSessionInTransaction(
                           { ...request.plan, databaseOptions: options },
                           {
-                            beforeMutation: currentClaim.assertCurrent,
+                            beforeMutation: () => {
+                              if (
+                                commitAuthorized &&
+                                !database.db.isTransaction &&
+                                !joinSqliteReclamationCommit(request.commitGate)
+                              ) {
+                                throw new Error(
+                                  "SQLite reclamation settlement barrier was not released",
+                                );
+                              }
+                              currentClaim.assertCurrent();
+                            },
                             onCommit: authorizeCommit,
                           },
                         );

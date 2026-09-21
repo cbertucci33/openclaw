@@ -392,13 +392,17 @@ export function reclaimSqliteSessionInTransaction(
     return { archivedTranscripts: deleted ? archivedTranscripts : [], deleted };
   }, plan.databaseOptions);
   if (plan.kind === "history-eviction" && value.deleted) {
-    reclaimSqliteFreePagesBestEffort(plan.databaseOptions);
+    reclaimSqliteFreePagesBestEffort(plan.databaseOptions, callbacks.beforeMutation);
   }
   return { kind: plan.kind, value };
 }
 
-function reclaimSqliteFreePagesBestEffort(databaseOptions: ReclamationDatabaseOptions): void {
+function reclaimSqliteFreePagesBestEffort(
+  databaseOptions: ReclamationDatabaseOptions,
+  beforeMutation?: () => void,
+): void {
   try {
+    beforeMutation?.();
     const database = openOpenClawAgentDatabase(databaseOptions);
     database.walMaintenance.reclaimFreePages({ checkpointMode: "PASSIVE" });
   } catch {

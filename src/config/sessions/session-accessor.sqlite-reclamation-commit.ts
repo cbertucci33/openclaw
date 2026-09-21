@@ -15,6 +15,8 @@ const REJECTED = 2;
 const COMMITTING = 3;
 const SETTLED = 4;
 const REQUESTED = 5;
+const JOINED = 6;
+const JOIN_FAILED = 7;
 
 /** Preserve the reclamation owner's context when an unrelated synchronous writer helps. */
 export async function withSqliteReclamationAuthorization<T>(
@@ -98,8 +100,32 @@ export function waitForSqliteReclamationCommit(
 export function markSqliteReclamationSettled(buffer: SharedArrayBuffer | undefined): void {
   if (buffer) {
     const shared = new Int32Array(buffer);
-    Atomics.store(shared, 0, SETTLED);
+    for (;;) {
+      const current = Atomics.load(shared, 0);
+      if (current === JOINED || current === JOIN_FAILED) {
+        return;
+      }
+      if (Atomics.compareExchange(shared, 0, current, SETTLED) === current) {
+        break;
+      }
+    }
     Atomics.notify(shared, 0);
+  }
+}
+
+/** A settled Worker must join the parent's barrier release before further maintenance. */
+export function joinSqliteReclamationCommit(buffer: SharedArrayBuffer): boolean {
+  markSqliteReclamationSettled(buffer);
+  const shared = new Int32Array(buffer);
+  for (;;) {
+    const current = Atomics.load(shared, 0);
+    if (current === JOINED) {
+      return true;
+    }
+    if (current === JOIN_FAILED) {
+      return false;
+    }
+    Atomics.wait(shared, 0, current);
   }
 }
 
@@ -179,6 +205,10 @@ function authorizeSqliteReclamationCommit(
         recoveredErrors.push(error);
       }
     }
+    // Native COMMIT can finish while this connection still owns its confirmation lock.
+    const joined = settled && (!database?.isOpen || !database.isTransaction);
+    Atomics.store(shared, 0, joined ? JOINED : JOIN_FAILED);
+    Atomics.notify(shared, 0);
   }
   return recoveredErrors;
 }
