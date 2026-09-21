@@ -260,7 +260,14 @@ describe("scripts/ci-run-node-test-shard.mts", () => {
     async (policy) => {
       const skippedOnBun = "src/process/spawn-broker/cleanup.test.ts";
       const v8HeapTest = "src/infra/worker-task-pool.memory.test.ts";
-      const includePatterns = [bunTarget, nodeTarget, skippedOnBun, v8HeapTest];
+      const nodeHistoryBenchmark = "test/scripts/bench-session-history.test.ts";
+      const includePatterns = [
+        bunTarget,
+        nodeTarget,
+        skippedOnBun,
+        v8HeapTest,
+        nodeHistoryBenchmark,
+      ];
       const shard = { configs: [bunConfig], includePatterns, shard_name: "partition" };
       const seen: Array<{
         runtime: string | undefined;
@@ -296,7 +303,9 @@ describe("scripts/ci-run-node-test-shard.mts", () => {
         {
           runtime: "node",
           includes:
-            policy === "dual" ? includePatterns : [nodeTarget, skippedOnBun, v8HeapTest].toSorted(),
+            policy === "dual"
+              ? includePatterns
+              : [nodeTarget, skippedOnBun, v8HeapTest, nodeHistoryBenchmark].toSorted(),
           label: `${nodePrefix}partition`,
           timing: `${nodePrefix}partition`,
         },
