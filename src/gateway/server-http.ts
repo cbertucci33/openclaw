@@ -67,13 +67,13 @@ import {
 import {
   getCachedPluginGatewayAuthBypassPaths,
   shouldEnforceDefaultPluginGatewayAuth,
-  type PluginGatewayDispatchContext,
   type ResolvePluginNodeCapabilityRoute,
 } from "./server-http-plugin-auth.js";
 import { handleGatewayProbeRequest } from "./server-http-probes.js";
 import type { GatewayRequestContext } from "./server-methods/types.js";
 import type { HooksRequestHandler } from "./server/hooks-request-handler.js";
 import { runWithGatewayHttpWorkAdmission } from "./server/http-work-admission.js";
+import type { PluginHttpRequestHandler } from "./server/plugins-http.js";
 import {
   resolvePluginRoutePathContext,
   type PluginRoutePathContext,
@@ -93,13 +93,6 @@ import {
   handleWorkerBootstrapArtifactTransferHttpRequest,
   type WorkerBootstrapArtifactTransferHttpCallback,
 } from "./worker-environments/worker-bootstrap-artifact-transfer-http.js";
-
-type PluginHttpRequestHandler = (
-  req: IncomingMessage,
-  res: ServerResponse,
-  pathContext?: PluginRoutePathContext,
-  dispatchContext?: PluginGatewayDispatchContext,
-) => Promise<boolean>;
 
 type WatchNodeHttpRequestHandler = (req: IncomingMessage, res: ServerResponse) => Promise<boolean>;
 type McpOAuthCallbackHandler = (req: IncomingMessage, res: ServerResponse) => Promise<boolean>;
@@ -346,6 +339,9 @@ export function createGatewayHttpServer(opts: {
       const resolvedAuthValue = getResolvedAuth();
       const routeAuth = {
         auth: resolvedAuthValue,
+        cfg: configSnapshot,
+        getRuntimeConfig: loadGatewayConfig,
+        getResolvedAuth,
         trustedProxies,
         allowRealIpFallback,
         rateLimiter,
@@ -655,7 +651,6 @@ export function createGatewayHttpServer(opts: {
               req,
               res,
               ...routeAuth,
-              getResolvedAuth,
               requestPath: scopedRequestPath,
               resolveOperatorScopes: resolvePluginRouteRuntimeOperatorScopes,
             });
@@ -667,13 +662,18 @@ export function createGatewayHttpServer(opts: {
             pluginRequestOperatorScopes = authResult.operatorScopes;
             return false;
           },
-          () =>
-            handlePluginRequest(req, res, pluginPathContext, {
+          () => {
+            if (pluginGatewayRequestAuth?.hasCurrentClientAuthority?.() === false) {
+              sendGatewayAuthFailure(res, { ok: false, reason: "unauthorized" });
+              return true;
+            }
+            return handlePluginRequest(req, res, pluginPathContext, {
               gatewayAuthSatisfied: pluginGatewayAuthSatisfied,
               gatewayRequestAuth: pluginGatewayRequestAuth,
               gatewayRequestOperatorScopes: pluginRequestOperatorScopes,
               gatewayRequestClientIp: requestClientIp,
-            }),
+            });
+          },
         );
       }
 
