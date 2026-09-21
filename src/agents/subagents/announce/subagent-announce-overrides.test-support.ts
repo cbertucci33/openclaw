@@ -6,11 +6,13 @@ import * as embeddedRuns from "../../embedded-agent-runner/runs.js";
 import * as deliveryRuntime from "./subagent-announce-delivery.runtime.js";
 import * as announceRuntime from "./subagent-announce.runtime.js";
 
-type AnnounceTestDeps = Pick<
-  typeof announceRuntime,
-  "dispatchGatewayMethodInProcess" | "getRuntimeConfig"
-> & {
-  callGateway: typeof announceRuntime.callSubagentLifecycleGateway;
+type AnnounceTestDeps = Pick<typeof announceRuntime, "getRuntimeConfig"> & {
+  dispatchGatewayMethodInProcess: Parameters<
+    MockInstance<typeof announceRuntime.dispatchGatewayMethodInProcess>["mockImplementation"]
+  >[0];
+  callGateway: Parameters<
+    MockInstance<typeof announceRuntime.callSubagentLifecycleGateway>["mockImplementation"]
+  >[0];
 };
 
 type OutputTestDeps = Pick<
@@ -21,7 +23,7 @@ type OutputTestDeps = Pick<
   | "resolveAgentIdFromSessionKey"
   | "resolveSessionStorePathCore"
 > & {
-  callGateway: typeof announceRuntime.callSubagentLifecycleGateway;
+  callGateway: AnnounceTestDeps["callGateway"];
   findTranscriptEvent: typeof sessionAccessor.findTranscriptEvent;
   findSessionTranscriptArchiveEventReadOnly: typeof sessionHistory.findSessionTranscriptArchiveEventReadOnly;
 };
@@ -94,7 +96,7 @@ function replaceOverrides(scope: Scope, overrides?: Overrides) {
                 expectFinal: options?.expectFinal,
                 onAccepted: options?.onAccepted,
                 timeoutMs: options?.timeoutMs,
-              })) satisfies typeof announceRuntime.dispatchGatewayMethodInProcess,
+              })) satisfies AnnounceTestDeps["dispatchGatewayMethodInProcess"],
           }
         : {}),
     });
