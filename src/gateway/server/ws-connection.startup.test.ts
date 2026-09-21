@@ -212,31 +212,12 @@ async function attachStartupNodeConnect(params: {
       }),
     ),
   );
-  const response = async () => {
-    await vi.waitFor(() => {
-      expect(
-        sent.some(
-          (frame) =>
-            typeof frame === "object" &&
-            frame !== null &&
-            (frame as StartupConnectResponse).id === "startup-node-connect",
-        ),
-      ).toBe(true);
-    });
-    return sent.find(
-      (frame) =>
-        typeof frame === "object" &&
-        frame !== null &&
-        (frame as StartupConnectResponse).id === "startup-node-connect",
-    ) as StartupConnectResponse;
-  };
   return {
     clients,
     identity,
     nodeRegistry,
     pendingSetup,
-    response,
-    responseReceived: connectResponse.promise,
+    response: connectResponse.promise,
     sent,
     socket,
   };
@@ -461,7 +442,7 @@ describe("attachGatewayWsConnectionHandler startup readiness", () => {
             store.hasPendingNodeEnrollmentSetup(candidateSetupId, deviceId),
         });
 
-        await expect(harness.response()).resolves.toMatchObject({
+        await expect(harness.response).resolves.toMatchObject({
           ok: true,
           payload: { type: "hello-ok", auth: { role: "node", scopes: [] } },
         });
@@ -539,7 +520,7 @@ describe("attachGatewayWsConnectionHandler startup readiness", () => {
               store.hasPendingNodeEnrollmentSetup(candidateSetupId, deviceId),
           });
 
-          const response = await harness.response();
+          const response = await harness.response;
           expect(harness.pendingSetup).toHaveBeenCalledWith(setupId, identity.deviceId);
           if (destroyRequested) {
             expect(response).toMatchObject({
@@ -654,7 +635,7 @@ describe("attachGatewayWsConnectionHandler startup readiness", () => {
             expect(harness.nodeRegistry.register).not.toHaveBeenCalled();
 
             releaseAuthentication.resolve();
-            await expect(harness.responseReceived).resolves.toMatchObject({ ok: true });
+            await expect(harness.response).resolves.toMatchObject({ ok: true });
             expect(registeredRootCounts).toEqual([1]);
             if (connectionKind === "paired shared-token") {
               expect(harness.pendingSetup).not.toHaveBeenCalled();
@@ -695,7 +676,7 @@ describe("attachGatewayWsConnectionHandler startup readiness", () => {
             store.hasPendingNodeEnrollmentSetup(candidateSetupId, deviceId),
         });
 
-        await expect(nonCloudHarness.response()).resolves.toMatchObject({
+        await expect(nonCloudHarness.response).resolves.toMatchObject({
           ok: false,
           error: {
             code: "UNAVAILABLE",
@@ -718,7 +699,7 @@ describe("attachGatewayWsConnectionHandler startup readiness", () => {
             store.hasPendingNodeEnrollmentSetup(candidateSetupId, deviceId),
         });
 
-        await expect(wrongSetupHarness.response()).resolves.toMatchObject({
+        await expect(wrongSetupHarness.response).resolves.toMatchObject({
           ok: false,
           error: {
             code: "UNAVAILABLE",
@@ -761,7 +742,7 @@ describe("attachGatewayWsConnectionHandler startup readiness", () => {
               rateLimiter,
             });
 
-            await expect(harness.response()).resolves.toMatchObject({
+            await expect(harness.response).resolves.toMatchObject({
               ok: false,
               error: {
                 code: "UNAVAILABLE",
