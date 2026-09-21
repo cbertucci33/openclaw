@@ -14918,25 +14918,40 @@ printf '%s\n' "\${CURL_SUCCESS_IP:-203.0.113.7}"
       eventName: "pull_request",
     });
     expect(matrixFallbackPullRequest.status, matrixFallbackPullRequest.output).toBe(0);
+    const matrixFallbackRows = JSON.parse(
+      expectDefined(
+        matrixFallbackPullRequest.outputs.checks_node_core_nondist_matrix,
+        "Matrix fallback PR node matrix output",
+      ),
+    ).include;
+    const matrixFallbackRow = expectDefined(
+      matrixFallbackRows.find(
+        (row: { check_name: string }) => row.check_name === "changed-extension-fallback-plan",
+      ),
+      "Matrix fallback row",
+    );
     expect(
-      JSON.parse(
-        expectDefined(
-          matrixFallbackPullRequest.outputs.checks_node_core_nondist_matrix,
-          "Matrix fallback PR node matrix output",
-        ),
-      ).include,
-    ).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          check_name: "changed-extension-fallback-plan",
+      resolveShardPlans({
+        OPENCLAW_NODE_TEST_GROUPS_GZIP_BASE64: matrixFallbackRow.groups_gzip_base64,
+        OPENCLAW_NODE_TEST_GROUPS_JSON: JSON.stringify(matrixFallbackRow.groups),
+        OPENCLAW_NODE_TEST_CONFIGS_JSON: JSON.stringify(matrixFallbackRow.configs),
+        OPENCLAW_NODE_TEST_ENV_JSON: JSON.stringify(matrixFallbackRow.env),
+        OPENCLAW_NODE_TEST_INCLUDE_PATTERNS_JSON: JSON.stringify(matrixFallbackRow.includePatterns),
+        OPENCLAW_NODE_TEST_TARGETS_JSON: JSON.stringify(matrixFallbackRow.targets),
+        OPENCLAW_VITEST_SHARD_NAME: matrixFallbackRow.shard_name,
+      }),
+    ).toEqual([
+      expect.objectContaining({
+        kind: "group",
+        plan: expect.objectContaining({
           configs: ["test/vitest/vitest.extension-matrix.config.ts"],
           includePatterns: [
             "extensions/matrix/src/client.test.ts",
             "extensions/matrix/src/monitor.test.ts",
           ],
         }),
-      ]),
-    );
+      }),
+    ]);
 
     const sqliteLifecycleTestPullRequest = runCiManifestFixture({
       bundledPlanner: true,
@@ -14953,11 +14968,27 @@ printf '%s\n' "\${CURL_SUCCESS_IP:-203.0.113.7}"
       eventName: "pull_request",
     });
     expect(emptyPullRequest.status, emptyPullRequest.output).toBe(0);
+    const emptyRows = JSON.parse(
+      expectDefined(emptyPullRequest.outputs.checks_node_core_nondist_matrix, "empty PR matrix"),
+    ).include;
+    expect(emptyRows).toEqual([expect.objectContaining({ check_name: "bundled-node-plan" })]);
+    const [emptyRow] = emptyRows;
     expect(
-      JSON.parse(
-        expectDefined(emptyPullRequest.outputs.checks_node_core_nondist_matrix, "empty PR matrix"),
-      ).include,
-    ).toEqual([expect.objectContaining({ check_name: "bundled-node-plan", includePatterns: [] })]);
+      resolveShardPlans({
+        OPENCLAW_NODE_TEST_GROUPS_GZIP_BASE64: emptyRow.groups_gzip_base64,
+        OPENCLAW_NODE_TEST_GROUPS_JSON: JSON.stringify(emptyRow.groups),
+        OPENCLAW_NODE_TEST_CONFIGS_JSON: JSON.stringify(emptyRow.configs),
+        OPENCLAW_NODE_TEST_ENV_JSON: JSON.stringify(emptyRow.env),
+        OPENCLAW_NODE_TEST_INCLUDE_PATTERNS_JSON: JSON.stringify(emptyRow.includePatterns),
+        OPENCLAW_NODE_TEST_TARGETS_JSON: JSON.stringify(emptyRow.targets),
+        OPENCLAW_VITEST_SHARD_NAME: emptyRow.shard_name,
+      }),
+    ).toEqual([
+      expect.objectContaining({
+        kind: "group",
+        plan: expect.objectContaining({ includePatterns: [] }),
+      }),
+    ]);
 
     for (const [changedPlannerSource, error] of [
       [null, "Current CI target does not provide ./scripts/lib/ci-changed-node-test-plan.mjs"],
