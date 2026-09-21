@@ -2,6 +2,14 @@ import { randomUUID } from "node:crypto";
 import { describe, expect, it, vi, type Mock } from "vitest";
 import { registerAgentWorkspaceAccess } from "../../agents/workspace-access.js";
 import { FsSafeError } from "../../infra/fs-safe.js";
+import {
+  expectRecordFields,
+  expectRespondErrorContaining,
+  expectRespondOk,
+  expectStringContaining,
+  expectStringNotContaining,
+  mockCallArg,
+} from "./agents-mutate.test-support.js";
 import type { testing } from "./agents.js";
 
 type IdentityUpdateHarness = {
@@ -26,33 +34,12 @@ type IdentityUpdateHarness = {
   }) => NonNullable<Parameters<typeof testing.setDepsForTests>[0]["root"]>;
   makeFileStat: () => import("node:fs").Stats;
   createEnoentError: () => Error;
-  mockCallArg: (mock: Mock, callIndex?: number, argIndex?: number) => unknown;
-  expectRecordFields: (
-    record: unknown,
-    expected: Record<string, unknown>,
-  ) => Record<string, unknown>;
-  expectRespondOk: (respond: Mock, expected: Record<string, unknown>) => Record<string, unknown>;
-  expectRespondErrorContaining: (respond: Mock, text: string) => Record<string, unknown>;
-  expectStringContaining: (value: unknown, text: string) => void;
-  expectStringNotContaining: (value: unknown, text: string) => void;
 };
 
 /** Share the mutation harness while exercising identity changes through agents.update. */
 export function registerAgentIdentityUpdateTests(harness: IdentityUpdateHarness): void {
-  const {
-    mocks,
-    agentsTesting,
-    makeCall,
-    makeRootForTest,
-    makeFileStat,
-    createEnoentError,
-    mockCallArg,
-    expectRecordFields,
-    expectRespondOk,
-    expectRespondErrorContaining,
-    expectStringContaining,
-    expectStringNotContaining,
-  } = harness;
+  const { mocks, agentsTesting, makeCall, makeRootForTest, makeFileStat, createEnoentError } =
+    harness;
   describe("identity", () => {
     it.each(["available", "revoked"] as const)(
       "updates the identity form through remote workspace access when %s",

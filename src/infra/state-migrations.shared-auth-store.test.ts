@@ -21,14 +21,15 @@ import {
   closeOpenClawAgentDatabasesAsync,
   closeOpenClawAgentDatabasesForTest,
 } from "../state/openclaw-agent-db.js";
-import { ensureAgentDeletionJournalSchema } from "../state/openclaw-state-db-schema-additive.js";
 import * as stateDb from "../state/openclaw-state-db.js";
 import { resolveOpenClawStateSqlitePath } from "../state/openclaw-state-db.paths.js";
+import { OPENCLAW_STATE_SCHEMA_SQL } from "../state/openclaw-state-schema.js";
 import {
   createOpenClawTestState,
   type OpenClawTestState,
 } from "../test-utils/openclaw-test-state.js";
 import { readMainDatabasePosixLocks } from "./sqlite-posix-locks.test-support.js";
+import { extractSqliteTableSchema } from "./sqlite-schema-sql.js";
 import * as doctor from "./state-migrations.doctor.js";
 import * as migration from "./state-migrations.shared-auth-store.js";
 
@@ -121,7 +122,7 @@ describe("shared auth store relocation", () => {
             PRAGMA wal_autocheckpoint = 0;
             CREATE TABLE IF NOT EXISTS auth_profile_store (store_key TEXT, store_json TEXT, updated_at INTEGER);
             CREATE TABLE IF NOT EXISTS config_machine_state (state_key TEXT, value_json TEXT, updated_at_ms INTEGER);
-            CREATE TABLE IF NOT EXISTS migration_sources (source_key TEXT, migration_kind TEXT, source_path TEXT, removed_source INTEGER);
+            CREATE TABLE IF NOT EXISTS migration_sources (source_key TEXT, migration_kind TEXT, source_path TEXT, removed_source INTEGER, source_sha256 TEXT, report_json TEXT);
             PRAGMA wal_checkpoint(TRUNCATE);
           `);
           if (target === fixture.sourcePath) {
@@ -129,13 +130,15 @@ describe("shared auth store relocation", () => {
               .prepare("INSERT INTO auth_profile_store VALUES ('primary', ?, 1)")
               .run(JSON.stringify(makeStore("openai:copied", "fixture-key")));
           } else {
-            ensureAgentDeletionJournalSchema(seed);
+            seed.exec(
+              extractSqliteTableSchema(OPENCLAW_STATE_SCHEMA_SQL, "agent_deletion_journal"),
+            );
             seed
               .prepare("INSERT INTO config_machine_state VALUES ('auth.sharedStore', ?, 1)")
               .run(JSON.stringify({ location }));
             seed
               .prepare(
-                "INSERT INTO migration_sources VALUES ('pending', 'shared-auth-store-state-db', ?, 0)",
+                "INSERT INTO migration_sources (source_key, migration_kind, source_path, removed_source) VALUES ('pending', 'shared-auth-store-state-db', ?, 0)",
               )
               .run(fixture.sourcePath);
           }

@@ -13,6 +13,8 @@ import { resolveAgentsDirFromSessionStorePath, resolveSessionStorePathCore } fro
 import {
   listSqliteTargetCandidatePathsForSessionStorePath,
   resolveUnsuffixedSqliteTargetFromSessionStorePath,
+} from "./session-sqlite-target-paths.js";
+import {
   SessionStoreRegistryReadRequired,
   type SessionStoreRegistryRead,
 } from "./session-sqlite-target.js";
